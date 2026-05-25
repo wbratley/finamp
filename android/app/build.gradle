@@ -29,6 +29,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
+    namespace "com.unicornsonlsd.finamp"
     compileSdkVersion 34
 
     sourceSets {
