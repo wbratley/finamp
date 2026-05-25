@@ -2,7 +2,7 @@ import 'package:finamp/components/AlbumScreen/sync_album_or_playlist_button.dart
 import 'package:finamp/services/downloads_helper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:finamp/l10n/app_localizations.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:get_it/get_it.dart';
 
