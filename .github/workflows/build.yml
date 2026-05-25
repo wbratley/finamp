@@ -1,32 +1,105 @@
-name: Build
+name: Build and Release
 
 on:
-  pull_request:
   push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   build-android:
-    name: Build for Android
+    name: Build Android APK
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-java@v2
-      with:
-        distribution: 'zulu'
-        java-version: '17'
-    - uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-    - run: flutter pub get
-    - run: flutter build apk --debug
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Check signing secrets
+        id: signing
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          KEY: ${{ secrets.KEYSTORE_BASE64 }}
+
+      - name: Set up release signing
+        if: steps.signing.outputs.available == 'true'
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > /tmp/keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=/tmp/keystore.jks\n' \
+            '${{ secrets.STORE_PASSWORD }}' \
+            '${{ secrets.KEY_PASSWORD }}' \
+            '${{ secrets.KEY_ALIAS }}' \
+            > android/key.properties
+
+      - name: Build signed release APK
+        if: steps.signing.outputs.available == 'true'
+        run: flutter build apk --release
+
+      - name: Build debug APK (no signing secrets configured)
+        if: steps.signing.outputs.available == 'false'
+        run: flutter build apk --debug
+
+      - name: Rename APK
+        run: |
+          VERSION="${{ github.ref_name }}"
+          # For non-tag builds, use the short commit SHA
+          if [[ "$VERSION" != v* ]]; then
+            VERSION="${{ github.sha }}"
+            VERSION="${VERSION:0:7}"
+          fi
+          APK_RELEASE=build/app/outputs/flutter-apk/app-release.apk
+          APK_DEBUG=build/app/outputs/flutter-apk/app-debug.apk
+          if [ -f "$APK_RELEASE" ]; then
+            mv "$APK_RELEASE" "build/app/outputs/flutter-apk/finamp-${VERSION}.apk"
+          elif [ -f "$APK_DEBUG" ]; then
+            mv "$APK_DEBUG" "build/app/outputs/flutter-apk/finamp-${VERSION}-debug.apk"
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: finamp-apk
+          path: build/app/outputs/flutter-apk/finamp-*.apk
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/finamp-*.apk
+          generate_release_notes: true
+          name: Finamp ${{ github.ref_name }}
+
   build-ios:
-    name: Build for iOS
+    name: Build iOS (no-sign)
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v2
-    - uses: subosito/flutter-action@v2
-      with:
-        channel: 'stable'
-        architecture: x64
-    - run: flutter pub get
-    - run: flutter build ios --release --no-codesign
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign
