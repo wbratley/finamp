@@ -27,6 +27,9 @@ migrate_working_dir/
 # packages file containing multi-root paths
 .packages.generated
 
+# Generated l10n files
+lib/l10n/app_localizations*.dart
+
 # Flutter/Dart/Pub related
 **/doc/api/
 .dart_tool/
