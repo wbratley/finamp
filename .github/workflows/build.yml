@@ -38,6 +38,7 @@ jobs:
           SHORT_SHA="${{ github.sha }}"
           echo "pubspec=${PUBSPEC_VERSION}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${PUBSPEC_VERSION//+/-}" >> "$GITHUB_OUTPUT"
 
       - name: Check signing secrets
         id: signing
@@ -89,19 +90,15 @@ jobs:
           name: finamp-apk
           path: build/app/outputs/flutter-apk/finamp-*.apk
 
-      - name: Create or update latest release
+      - name: Create or update release
         if: github.ref == 'refs/heads/main'
         uses: ncipollo/release-action@v1
         with:
-          tag: latest
-          name: "Latest Build (v${{ steps.version.outputs.pubspec }})"
+          tag: ${{ steps.version.outputs.tag }}
+          name: "Finamp ${{ steps.version.outputs.tag }}"
           body: |
-            Automated build — updates on every push to `main`.
-
-            **Version:** `${{ steps.version.outputs.pubspec }}`
             **Commit:** [`${{ steps.version.outputs.short_sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
             **Built:** ${{ github.event.head_commit.timestamp }}
-          prerelease: true
           allowUpdates: true
           removeArtifacts: true
           artifacts: build/app/outputs/flutter-apk/finamp-*.apk
