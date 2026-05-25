@@ -71,10 +71,11 @@ jobs:
           DEBUG=build/app/outputs/flutter-apk/app-debug.apk
           if [ -f "$RELEASE" ]; then
             DEST="build/app/outputs/flutter-apk/finamp-${VERSION}.apk"
+            mv "$RELEASE" "$DEST"
           else
             DEST="build/app/outputs/flutter-apk/finamp-${VERSION}-debug.apk"
+            mv "$DEBUG" "$DEST"
           fi
-          mv "${RELEASE:-$DEBUG}" "$DEST"
           echo "path=$DEST" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
@@ -110,7 +111,6 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          architecture: x64
           cache: true
 
       - name: Get dependencies
