@@ -2,8 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: ['**']
-    tags: ['v*']
+    branches: ['main']
   pull_request:
   workflow_dispatch:
 
@@ -26,6 +25,14 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Get version info
+        id: version
+        run: |
+          PUBSPEC_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          SHORT_SHA="${{ github.sha }}"
+          echo "pubspec=${PUBSPEC_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Check signing secrets
         id: signing
@@ -57,20 +64,18 @@ jobs:
         run: flutter build apk --debug
 
       - name: Rename APK
+        id: apk
         run: |
-          VERSION="${{ github.ref_name }}"
-          # For non-tag builds, use the short commit SHA
-          if [[ "$VERSION" != v* ]]; then
-            VERSION="${{ github.sha }}"
-            VERSION="${VERSION:0:7}"
+          VERSION="${{ steps.version.outputs.pubspec }}-${{ steps.version.outputs.short_sha }}"
+          RELEASE=build/app/outputs/flutter-apk/app-release.apk
+          DEBUG=build/app/outputs/flutter-apk/app-debug.apk
+          if [ -f "$RELEASE" ]; then
+            DEST="build/app/outputs/flutter-apk/finamp-${VERSION}.apk"
+          else
+            DEST="build/app/outputs/flutter-apk/finamp-${VERSION}-debug.apk"
           fi
-          APK_RELEASE=build/app/outputs/flutter-apk/app-release.apk
-          APK_DEBUG=build/app/outputs/flutter-apk/app-debug.apk
-          if [ -f "$APK_RELEASE" ]; then
-            mv "$APK_RELEASE" "build/app/outputs/flutter-apk/finamp-${VERSION}.apk"
-          elif [ -f "$APK_DEBUG" ]; then
-            mv "$APK_DEBUG" "build/app/outputs/flutter-apk/finamp-${VERSION}-debug.apk"
-          fi
+          mv "${RELEASE:-$DEBUG}" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -78,13 +83,23 @@ jobs:
           name: finamp-apk
           path: build/app/outputs/flutter-apk/finamp-*.apk
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Create or update latest release
+        if: github.ref == 'refs/heads/main'
+        uses: ncipollo/release-action@v1
         with:
-          files: build/app/outputs/flutter-apk/finamp-*.apk
-          generate_release_notes: true
-          name: Finamp ${{ github.ref_name }}
+          tag: latest
+          name: "Latest Build (v${{ steps.version.outputs.pubspec }})"
+          body: |
+            Automated build — updates on every push to `main`.
+
+            **Version:** `${{ steps.version.outputs.pubspec }}`
+            **Commit:** [`${{ steps.version.outputs.short_sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+            **Built:** ${{ github.event.head_commit.timestamp }}
+          prerelease: true
+          allowUpdates: true
+          removeArtifacts: true
+          artifacts: build/app/outputs/flutter-apk/finamp-*.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build-ios:
     name: Build iOS (no-sign)
