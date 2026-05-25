@@ -28,6 +28,9 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Generate localizations
+        run: flutter gen-l10n
+
       - name: Get version info
         id: version
         run: |
@@ -117,6 +120,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Generate localizations
+        run: flutter gen-l10n
 
       - name: Build iOS (no codesign)
         run: flutter build ios --release --no-codesign
