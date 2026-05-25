@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:finamp/l10n/app_localizations.dart';
 
 import '../components/AddToPlaylistScreen/add_to_playlist_list.dart';
 import '../components/AddToPlaylistScreen/new_playlist_dialog.dart';
