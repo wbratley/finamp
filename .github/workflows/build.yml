@@ -35,7 +35,7 @@ jobs:
         id: version
         run: |
           SEMVER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-          BUILD_NUM=$(git rev-list --count HEAD)
+          BUILD_NUM=$(( ${{ github.run_number }} + 30 ))
           SHORT_SHA="${{ github.sha }}"
           echo "semver=${SEMVER}" >> "$GITHUB_OUTPUT"
           echo "build_num=${BUILD_NUM}" >> "$GITHUB_OUTPUT"
