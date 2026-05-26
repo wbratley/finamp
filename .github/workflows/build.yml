@@ -34,11 +34,13 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          PUBSPEC_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          SEMVER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          BUILD_NUM=$(git rev-list --count HEAD)
           SHORT_SHA="${{ github.sha }}"
-          echo "pubspec=${PUBSPEC_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "semver=${SEMVER}" >> "$GITHUB_OUTPUT"
+          echo "build_num=${BUILD_NUM}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${SHORT_SHA:0:7}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${PUBSPEC_VERSION//+/-}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${SEMVER}-${BUILD_NUM}" >> "$GITHUB_OUTPUT"
 
       - name: Check signing secrets
         id: signing
@@ -63,16 +65,16 @@ jobs:
 
       - name: Build signed release APK
         if: steps.signing.outputs.available == 'true'
-        run: flutter build apk --release
+        run: flutter build apk --release --build-number=${{ steps.version.outputs.build_num }}
 
       - name: Build debug APK (no signing secrets configured)
         if: steps.signing.outputs.available == 'false'
-        run: flutter build apk --debug
+        run: flutter build apk --debug --build-number=${{ steps.version.outputs.build_num }}
 
       - name: Rename APK
         id: apk
         run: |
-          VERSION="${{ steps.version.outputs.pubspec }}-${{ steps.version.outputs.short_sha }}"
+          VERSION="${{ steps.version.outputs.semver }}-${{ steps.version.outputs.build_num }}-${{ steps.version.outputs.short_sha }}"
           RELEASE=build/app/outputs/flutter-apk/app-release.apk
           DEBUG=build/app/outputs/flutter-apk/app-debug.apk
           if [ -f "$RELEASE" ]; then
