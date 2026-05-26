@@ -682,7 +682,11 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
         return Future.error(
             "Offline mode enabled but downloaded song not found.");
       } else {
-        if (mediaItem.extras!["shouldTranscode"] == true) {
+        // Video items must always use the HLS audio path — direct play returns
+        // the full video container which just_audio can't handle for audio-only.
+        final isVideoItem =
+            mediaItem.extras!["itemJson"]["Type"] == "Video";
+        if (mediaItem.extras!["shouldTranscode"] == true || isVideoItem) {
           return HlsAudioSource(await _songUri(mediaItem), tag: mediaItem);
         } else {
           return AudioSource.uri(await _songUri(mediaItem), tag: mediaItem);
@@ -728,7 +732,8 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
     // have issues with headers in HLS, and this solution still works fine
     queryParameters["ApiKey"] = _finampUserHelper.currentUser!.accessToken;
 
-    if (mediaItem.extras!["shouldTranscode"]) {
+    final isVideoItem = mediaItem.extras!["itemJson"]["Type"] == "Video";
+    if (mediaItem.extras!["shouldTranscode"] || isVideoItem) {
       builtPath.addAll([
         "Audio",
         mediaItem.extras!["itemJson"]["Id"],

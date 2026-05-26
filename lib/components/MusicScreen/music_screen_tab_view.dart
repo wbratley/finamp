@@ -583,7 +583,7 @@ class _MusicScreenTabViewState extends State<MusicScreenTabView>
 String _includeItemTypes(TabContentType tabContentType) {
   switch (tabContentType) {
     case TabContentType.songs:
-      return "Audio";
+      return "Audio,Video";
     case TabContentType.albums:
       return "MusicAlbum";
     case TabContentType.artists:
@@ -610,5 +610,8 @@ bool _offlineSearch(
     containsName = item.name!.toLowerCase().contains(searchTerm.toLowerCase());
   }
 
-  return item.type == _includeItemTypes(tabContentType) && containsName;
+  return _includeItemTypes(tabContentType)
+          .split(",")
+          .contains(item.type) &&
+      containsName;
 }

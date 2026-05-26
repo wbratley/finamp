@@ -129,7 +129,7 @@ class AudioServiceHelper {
       items = await _jellyfinApiHelper.getItems(
         isGenres: false,
         parentItem: _finampUserHelper.currentUser!.currentView,
-        includeItemTypes: "Audio",
+        includeItemTypes: "Audio,Video",
         filters: isFavourite ? "IsFavorite" : null,
         limit: FinampSettingsHelper.finampSettings.songShuffleItemCount,
         sortBy: "Random",
