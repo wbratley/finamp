@@ -1,3 +1,4 @@
+import 'package:finamp/models/jellyfin_models.dart';
 import 'package:flutter/material.dart';
 
 class AlphabetList extends StatefulWidget {

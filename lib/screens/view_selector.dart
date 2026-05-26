@@ -40,10 +40,10 @@ class _ViewSelectorState extends State<ViewSelector> {
           // Finamp only supports music libraries. We used to allow people to
           // select unsupported libraries, but some people selected "general"
           // libraries and thought Finamp was broken.
-          const supportedCollectionTypes = {"music", "homevideos", "musicvideos"};
+          const _supportedCollectionTypes = {"music", "homevideos", "musicvideos"};
           if (snapshot.data!.isEmpty ||
               !snapshot.data!.any((element) =>
-                  supportedCollectionTypes.contains(element.collectionType))) {
+                  _supportedCollectionTypes.contains(element.collectionType))) {
             return NoMusicLibrariesMessage(
               onRefresh: () {
                 setState(() {
@@ -58,7 +58,7 @@ class _ViewSelectorState extends State<ViewSelector> {
             _views.addEntries(snapshot.data!
                 .where((element) => element.collectionType != "playlists")
                 .map((e) => MapEntry(
-                    e, supportedCollectionTypes.contains(e.collectionType))));
+                    e, _supportedCollectionTypes.contains(e.collectionType))));
 
             // If only one music library is available and user doesn't have a
             // view saved (assuming setup is in progress), skip the selector.
@@ -91,7 +91,7 @@ class _ViewSelectorState extends State<ViewSelector> {
 
                   return CheckboxListTile(
                     value: isSelected,
-                    enabled: supportedCollectionTypes.contains(view.collectionType),
+                    enabled: _supportedCollectionTypes.contains(view.collectionType),
                     title: Text(_views.keys.elementAt(index).name ??
                         AppLocalizations.of(context)!.unknownName),
                     onChanged: (value) {

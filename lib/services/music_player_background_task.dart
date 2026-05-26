@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:android_id/android_id.dart';
 import 'package:audio_service/audio_service.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:finamp/services/offline_listen_helper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
@@ -713,6 +715,11 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
     // but since audio_service runs in an isolate (or at least, it does until
     // 0.18), the value would be wrong if changed while a song was playing since
     // Hive is bad at multi-isolate stuff.
+
+    final androidId =
+        Platform.isAndroid ? await const AndroidId().getId() : null;
+    final iosDeviceInfo =
+        Platform.isIOS ? await DeviceInfoPlugin().iosInfo : null;
 
     final parsedBaseUrl = Uri.parse(_finampUserHelper.currentUser!.baseUrl);
 

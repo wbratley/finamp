@@ -1,3 +1,4 @@
+import 'package:chopper/chopper.dart';
 import 'package:get_it/get_it.dart';
 import 'package:logging/logging.dart';
 

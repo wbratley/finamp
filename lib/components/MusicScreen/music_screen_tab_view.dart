@@ -592,6 +592,8 @@ String _includeItemTypes(TabContentType tabContentType) {
       return "MusicGenre";
     case TabContentType.playlists:
       return "Playlist";
+    default:
+      throw const FormatException("Unsupported TabContentType");
   }
 }
 
