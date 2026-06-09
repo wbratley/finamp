@@ -16,6 +16,16 @@ List<TextSpan> ArtistsTextSpans(
   final jellyfinApiHelper = GetIt.instance<JellyfinApiHelper>();
   List<TextSpan> separatedArtistTextSpans = [];
 
+  // For YouTube videos, show the channel name as a non-tappable text span
+  if (item.type == 'Video') {
+    return [
+      TextSpan(
+        text: item.channelName ?? 'Unknown Channel',
+        style: TextStyle(color: textColour),
+      )
+    ];
+  }
+
   List<NameIdPair>? artists =
     item.type == "MusicAlbum"
     ? item.albumArtists
