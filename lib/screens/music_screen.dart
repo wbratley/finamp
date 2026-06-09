@@ -12,6 +12,7 @@ import '../components/MusicScreen/music_screen_tab_view.dart';
 import '../components/MusicScreen/music_screen_drawer.dart';
 import '../components/MusicScreen/sort_by_menu_button.dart';
 import '../components/MusicScreen/sort_order_button.dart';
+import '../components/YoutubeScreen/youtube_library_view.dart';
 import '../components/now_playing_bar.dart';
 import '../components/error_snackbar.dart';
 import '../services/jellyfin_api_helper.dart';
@@ -161,6 +162,30 @@ class _MusicScreenState extends State<MusicScreen>
     return ValueListenableBuilder<Box<FinampUser>>(
       valueListenable: _finampUserHelper.finampUsersListenable,
       builder: (context, value, _) {
+        // Show a dedicated YouTube/video view for video libraries
+        final currentView = _finampUserHelper.currentUser?.currentView;
+        const videoLibraryTypes = {'homevideos', 'musicvideos'};
+        if (videoLibraryTypes.contains(currentView?.collectionType)) {
+          return WillPopScope(
+            onWillPop: () async {
+              if (isSearching) {
+                _stopSearching();
+                return false;
+              }
+              return true;
+            },
+            child: Scaffold(
+              appBar: AppBar(
+                title: Text(currentView!.name ?? 'Videos'),
+              ),
+              bottomNavigationBar: const NowPlayingBar(),
+              drawer: const MusicScreenDrawer(),
+              // Key forces a full rebuild when the library changes
+              body: YoutubeLibraryView(key: ValueKey(currentView.id)),
+            ),
+          );
+        }
+
         return ValueListenableBuilder<Box<FinampSettings>>(
           valueListenable: FinampSettingsHelper.finampSettingsListener,
           builder: (context, value, _) {

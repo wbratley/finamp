@@ -172,8 +172,9 @@ class _SongListTileState extends State<SongListTile> {
                   ),
                   if (widget.showArtists)
                     TextSpan(
-                      text:
-                          " · ${processArtist(widget.item.artists?.join(", ") ?? widget.item.albumArtist, context)}",
+                      text: widget.item.type == 'Video'
+                          ? ' · ${widget.item.channelName ?? ''}'
+                          : " · ${processArtist(widget.item.artists?.join(", ") ?? widget.item.albumArtist, context)}",
                       style: TextStyle(color: Theme.of(context).disabledColor),
                     )
                 ],

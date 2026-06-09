@@ -37,6 +37,7 @@ import 'screens/layout_settings_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/music_screen.dart';
 import 'screens/player_screen.dart';
+import 'screens/youtube_channel_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/tabs_settings_screen.dart';
@@ -338,6 +339,8 @@ class Finamp extends StatelessWidget {
                           const LayoutSettingsScreen(),
                       LanguageSelectionScreen.routeName: (context) =>
                           const LanguageSelectionScreen(),
+                      YoutubeChannelScreen.routeName: (context) =>
+                          const YoutubeChannelScreen(),
                     },
                     initialRoute: SplashScreen.routeName,
                     theme: ThemeData(
