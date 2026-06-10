@@ -35,6 +35,10 @@ class JellyfinApiHelper {
 
     /// The maximum number of records to return.
     int? limit,
+
+    /// Whether to recurse into child folders. Defaults to true to preserve
+    /// existing behaviour. Pass false to fetch only direct children.
+    bool recursive = true,
   }) async {
     final currentUser = _finampUserHelper.currentUser;
     if (currentUser == null) {
@@ -116,7 +120,7 @@ class JellyfinApiHelper {
         userId: currentUser.id,
         parentId: parentItem?.id,
         includeItemTypes: includeItemTypes,
-        recursive: true,
+        recursive: recursive,
         sortBy: sortBy,
         sortOrder: sortOrder,
         searchTerm: searchTerm,
