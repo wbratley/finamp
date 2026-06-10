@@ -35,10 +35,29 @@ class _YoutubeVideosTabState extends State<YoutubeVideosTab>
   Future<void> _loadVideos() async {
     setState(() => _isLoading = true);
     try {
+      final currentView = _finampUserHelper.currentUser?.currentView;
+
+      // Step 1: fetch channel folders to build a folderId -> name map
+      final folders = await _jellyfinApiHelper.getItems(
+        parentItem: currentView,
+        includeItemTypes: 'Folder',
+        isGenres: false,
+        limit: 10000,
+        startIndex: 0,
+      );
+
+      final folderNames = <String, String>{};
+      for (final folder in folders ?? []) {
+        if (folder.id != null) {
+          folderNames[folder.id!] = folder.name ?? 'Unknown Channel';
+        }
+      }
+
+      // Step 2: fetch all videos sorted by date descending
       final videos = await _jellyfinApiHelper.getItems(
-        parentItem: _finampUserHelper.currentUser?.currentView,
+        parentItem: currentView,
         includeItemTypes: 'Video',
-        sortBy: 'ChannelId,PremiereDate',
+        sortBy: 'PremiereDate',
         sortOrder: 'Descending',
         isGenres: false,
         limit: 10000,
@@ -53,24 +72,30 @@ class _YoutubeVideosTabState extends State<YoutubeVideosTab>
         return;
       }
 
-      // Group by channelId, preserving server sort order of channels
-      final grouped = <String, List<BaseItemDto>>{};
-      final channelOrder = <String>[];
-
+      // Stamp each video with its channel name so SongListTile can display it
       for (final video in videos) {
-        final key = video.channelId ?? 'unknown';
-        if (!grouped.containsKey(key)) {
-          grouped[key] = [];
-          channelOrder.add(key);
-        }
-        grouped[key]!.add(video);
+        video.channelName = folderNames[video.parentId];
       }
 
+      // Group videos by parentId (= channel folder)
+      final grouped = <String, List<BaseItemDto>>{};
+      for (final video in videos) {
+        final key = video.parentId ?? 'unknown';
+        grouped.putIfAbsent(key, () => []).add(video);
+      }
+
+      // Sort groups alphabetically by channel name
+      final sortedKeys = grouped.keys.toList()
+        ..sort((a, b) =>
+            (folderNames[a] ?? a).toLowerCase().compareTo(
+                  (folderNames[b] ?? b).toLowerCase(),
+                ));
+
       final List<Object> flatList = [];
-      for (final channelId in channelOrder) {
-        final channelVideos = grouped[channelId]!;
+      for (final folderId in sortedKeys) {
+        final channelVideos = grouped[folderId]!;
         flatList.add(_ChannelHeader(
-          name: channelVideos.first.channelName ?? 'Unknown Channel',
+          name: folderNames[folderId] ?? 'Unknown Channel',
           count: channelVideos.length,
         ));
         flatList.addAll(channelVideos);

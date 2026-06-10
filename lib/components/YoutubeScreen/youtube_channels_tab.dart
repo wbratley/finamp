@@ -21,7 +21,7 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
 
   bool _isLoading = true;
-  List<_ChannelEntry> _channels = [];
+  List<BaseItemDto> _channels = [];
 
   @override
   bool get wantKeepAlive => true;
@@ -35,9 +35,10 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
   Future<void> _loadChannels() async {
     setState(() => _isLoading = true);
     try {
-      final videos = await _jellyfinApiHelper.getItems(
+      // Each Pinchflat channel is a Folder directly under the library root
+      final folders = await _jellyfinApiHelper.getItems(
         parentItem: _finampUserHelper.currentUser?.currentView,
-        includeItemTypes: 'Video',
+        includeItemTypes: 'Folder',
         sortBy: 'SortName',
         sortOrder: 'Ascending',
         isGenres: false,
@@ -45,35 +46,9 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
         startIndex: 0,
       );
 
-      if (videos == null || videos.isEmpty) {
-        setState(() {
-          _isLoading = false;
-          _channels = [];
-        });
-        return;
-      }
-
-      // Derive unique channels; use the first video found as the thumbnail source
-      final seen = <String>{};
-      final channels = <_ChannelEntry>[];
-
-      for (final video in videos) {
-        final id = video.channelId ?? 'unknown';
-        if (!seen.contains(id)) {
-          seen.add(id);
-          channels.add(_ChannelEntry(
-            id: id,
-            name: video.channelName ?? 'Unknown Channel',
-            thumbnail: video,
-          ));
-        }
-      }
-
-      channels.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-
       setState(() {
         _isLoading = false;
-        _channels = channels;
+        _channels = folders ?? [];
       });
     } catch (e) {
       errorSnackbar(e, context);
@@ -99,34 +74,20 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
         itemCount: _channels.length,
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
-          final channel = _channels[index];
+          final folder = _channels[index];
           return ListTile(
-            leading: AlbumImage(item: channel.thumbnail),
+            leading: AlbumImage(item: folder),
             title: Text(
-              channel.name,
+              folder.name ?? 'Unknown Channel',
               overflow: TextOverflow.ellipsis,
             ),
             onTap: () => Navigator.of(context).pushNamed(
               YoutubeChannelScreen.routeName,
-              arguments: YoutubeChannelScreenArguments(
-                channelId: channel.id,
-                channelName: channel.name,
-              ),
+              arguments: YoutubeChannelScreenArguments(folder: folder),
             ),
           );
         },
       ),
     );
   }
-}
-
-class _ChannelEntry {
-  final String id;
-  final String name;
-  final BaseItemDto thumbnail;
-  const _ChannelEntry({
-    required this.id,
-    required this.name,
-    required this.thumbnail,
-  });
 }
