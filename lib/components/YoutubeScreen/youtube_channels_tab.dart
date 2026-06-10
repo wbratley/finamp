@@ -35,13 +35,17 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
   Future<void> _loadChannels() async {
     setState(() => _isLoading = true);
     try {
-      // Each Pinchflat channel is a Folder directly under the library root
+      // Fetch only the direct child folders of the library root.
+      // Pinchflat structure: Library/<Channel>/<Date Subfolder>/<video>
+      // recursive: false gives us only the channel-level folders,
+      // not the date subfolders nested inside them.
       final folders = await _jellyfinApiHelper.getItems(
         parentItem: _finampUserHelper.currentUser?.currentView,
         includeItemTypes: 'Folder',
         sortBy: 'SortName',
         sortOrder: 'Ascending',
         isGenres: false,
+        recursive: false,
         limit: 10000,
         startIndex: 0,
       );

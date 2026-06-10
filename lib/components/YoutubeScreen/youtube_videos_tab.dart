@@ -37,34 +37,21 @@ class _YoutubeVideosTabState extends State<YoutubeVideosTab>
     try {
       final currentView = _finampUserHelper.currentUser?.currentView;
 
-      // Step 1: fetch channel folders to build a folderId -> name map
-      final folders = await _jellyfinApiHelper.getItems(
+      // Step 1: fetch only the direct child folders (channel level).
+      // Pinchflat structure: Library/<Channel>/<Date Subfolder>/<video>
+      // recursive: false prevents date subfolders from appearing as channels.
+      final channels = await _jellyfinApiHelper.getItems(
         parentItem: currentView,
         includeItemTypes: 'Folder',
+        sortBy: 'SortName',
+        sortOrder: 'Ascending',
         isGenres: false,
+        recursive: false,
         limit: 10000,
         startIndex: 0,
       );
 
-      final folderNames = <String, String>{};
-      for (final folder in folders ?? []) {
-        if (folder.id != null) {
-          folderNames[folder.id!] = folder.name ?? 'Unknown Channel';
-        }
-      }
-
-      // Step 2: fetch all videos sorted by date descending
-      final videos = await _jellyfinApiHelper.getItems(
-        parentItem: currentView,
-        includeItemTypes: 'Video',
-        sortBy: 'PremiereDate',
-        sortOrder: 'Descending',
-        isGenres: false,
-        limit: 10000,
-        startIndex: 0,
-      );
-
-      if (videos == null || videos.isEmpty) {
+      if (channels == null || channels.isEmpty) {
         setState(() {
           _isLoading = false;
           _flatList = [];
@@ -72,33 +59,37 @@ class _YoutubeVideosTabState extends State<YoutubeVideosTab>
         return;
       }
 
-      // Stamp each video with its channel name so SongListTile can display it
-      for (final video in videos) {
-        video.channelName = folderNames[video.parentId];
-      }
+      // Step 2: fetch each channel's videos in parallel (recursive so date
+      // subfolders are traversed automatically).
+      final videoLists = await Future.wait(
+        channels.map((channel) => _jellyfinApiHelper.getItems(
+              parentItem: channel,
+              includeItemTypes: 'Video',
+              sortBy: 'PremiereDate',
+              sortOrder: 'Descending',
+              isGenres: false,
+              limit: 10000,
+              startIndex: 0,
+            )),
+      );
 
-      // Group videos by parentId (= channel folder)
-      final grouped = <String, List<BaseItemDto>>{};
-      for (final video in videos) {
-        final key = video.parentId ?? 'unknown';
-        grouped.putIfAbsent(key, () => []).add(video);
-      }
-
-      // Sort groups alphabetically by channel name
-      final sortedKeys = grouped.keys.toList()
-        ..sort((a, b) =>
-            (folderNames[a] ?? a).toLowerCase().compareTo(
-                  (folderNames[b] ?? b).toLowerCase(),
-                ));
-
+      // Step 3: build flat list — channel header followed by its videos.
       final List<Object> flatList = [];
-      for (final folderId in sortedKeys) {
-        final channelVideos = grouped[folderId]!;
+      for (int i = 0; i < channels.length; i++) {
+        final channel = channels[i];
+        final videos = videoLists[i] ?? [];
+        if (videos.isEmpty) continue;
+
+        // Stamp channel name so SongListTile subtitle renders correctly
+        for (final video in videos) {
+          video.channelName = channel.name;
+        }
+
         flatList.add(_ChannelHeader(
-          name: folderNames[folderId] ?? 'Unknown Channel',
-          count: channelVideos.length,
+          name: channel.name ?? 'Unknown Channel',
+          count: videos.length,
         ));
-        flatList.addAll(channelVideos);
+        flatList.addAll(videos);
       }
 
       setState(() {
