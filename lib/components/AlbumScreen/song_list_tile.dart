@@ -174,7 +174,7 @@ class _SongListTileState extends State<SongListTile> {
                   if (widget.showArtists)
                     TextSpan(
                       text: widget.item.type == 'Video'
-                          ? ' · ${widget.item.channelName ?? ''}${widget.item.premiereDate != null ? ' · ${DateFormat('d MMM yyyy').format(widget.item.premiereDate!.toLocal())}' : ''}'
+                          ? ' · ${widget.item.channelName ?? ''}${widget.item.premiereDate != null ? ' · ${DateFormat('d MMM yyyy').format(DateTime.parse(widget.item.premiereDate!).toLocal())}' : ''}'
                           : " · ${processArtist(widget.item.artists?.join(", ") ?? widget.item.albumArtist, context)}",
                       style: TextStyle(color: Theme.of(context).disabledColor),
                     )
