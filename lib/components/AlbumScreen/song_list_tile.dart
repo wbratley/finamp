@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:finamp/l10n/app_localizations.dart';
 import 'package:get_it/get_it.dart';
+import 'package:intl/intl.dart';
 import 'package:mini_music_visualizer/mini_music_visualizer.dart';
 
 import '../../models/jellyfin_models.dart';
@@ -173,7 +174,7 @@ class _SongListTileState extends State<SongListTile> {
                   if (widget.showArtists)
                     TextSpan(
                       text: widget.item.type == 'Video'
-                          ? ' · ${widget.item.channelName ?? ''}'
+                          ? ' · ${widget.item.channelName ?? ''}${widget.item.premiereDate != null ? ' · ${DateFormat('d MMM yyyy').format(DateTime.parse(widget.item.premiereDate!).toLocal())}' : ''}'
                           : " · ${processArtist(widget.item.artists?.join(", ") ?? widget.item.albumArtist, context)}",
                       style: TextStyle(color: Theme.of(context).disabledColor),
                     )
