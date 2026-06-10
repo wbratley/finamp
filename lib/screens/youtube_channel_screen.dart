@@ -5,16 +5,11 @@ import '../components/AlbumScreen/song_list_tile.dart';
 import '../components/error_snackbar.dart';
 import '../components/now_playing_bar.dart';
 import '../models/jellyfin_models.dart';
-import '../services/finamp_user_helper.dart';
 import '../services/jellyfin_api_helper.dart';
 
 class YoutubeChannelScreenArguments {
-  final String channelId;
-  final String channelName;
-  const YoutubeChannelScreenArguments({
-    required this.channelId,
-    required this.channelName,
-  });
+  final BaseItemDto folder;
+  const YoutubeChannelScreenArguments({required this.folder});
 }
 
 class YoutubeChannelScreen extends StatefulWidget {
@@ -28,7 +23,6 @@ class YoutubeChannelScreen extends StatefulWidget {
 
 class _YoutubeChannelScreenState extends State<YoutubeChannelScreen> {
   final _jellyfinApiHelper = GetIt.instance<JellyfinApiHelper>();
-  final _finampUserHelper = GetIt.instance<FinampUserHelper>();
 
   bool _isLoading = true;
   List<BaseItemDto> _videos = [];
@@ -46,8 +40,9 @@ class _YoutubeChannelScreenState extends State<YoutubeChannelScreen> {
   Future<void> _loadVideos() async {
     setState(() => _isLoading = true);
     try {
-      final all = await _jellyfinApiHelper.getItems(
-        parentItem: _finampUserHelper.currentUser?.currentView,
+      // Fetch videos scoped to the channel folder directly — no filtering needed
+      final videos = await _jellyfinApiHelper.getItems(
+        parentItem: _args.folder,
         includeItemTypes: 'Video',
         sortBy: 'PremiereDate',
         sortOrder: 'Descending',
@@ -56,13 +51,15 @@ class _YoutubeChannelScreenState extends State<YoutubeChannelScreen> {
         startIndex: 0,
       );
 
-      final filtered = (all ?? [])
-          .where((v) => v.channelId == _args.channelId)
-          .toList();
+      // Stamp channel name so SongListTile subtitle shows correctly
+      final channelName = _args.folder.name;
+      for (final video in videos ?? []) {
+        video.channelName = channelName;
+      }
 
       setState(() {
         _isLoading = false;
-        _videos = filtered;
+        _videos = videos ?? [];
       });
     } catch (e) {
       errorSnackbar(e, context);
@@ -73,7 +70,7 @@ class _YoutubeChannelScreenState extends State<YoutubeChannelScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_args.channelName)),
+      appBar: AppBar(title: Text(_args.folder.name ?? 'Channel')),
       bottomNavigationBar: const NowPlayingBar(),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator.adaptive())
