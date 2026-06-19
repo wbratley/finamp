@@ -132,7 +132,10 @@ class _SongListTileState extends State<SongListTile> {
                         style:
                             TextStyle(color: Theme.of(context).disabledColor)),
                   TextSpan(
-                    text: widget.item.name ??
+                    text: widget.item.type == 'Video'
+                        ? (widget.item.name ?? AppLocalizations.of(context)!.unknownName)
+                            .replaceAll(RegExp(r'\s*\[[\w-]{11}\]\s*$'), '')
+                        : widget.item.name ??
                         AppLocalizations.of(context)!.unknownName,
                     style: TextStyle(
                       color: isCurrentlyPlaying
