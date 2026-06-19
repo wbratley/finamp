@@ -4,8 +4,8 @@ import 'package:get_it/get_it.dart';
 import '../../models/jellyfin_models.dart';
 import '../../services/finamp_user_helper.dart';
 import '../../services/jellyfin_api_helper.dart';
-import '../AlbumScreen/song_list_tile.dart';
 import '../error_snackbar.dart';
+import 'youtube_video_progress_tile.dart';
 
 class YoutubeVideosTab extends StatefulWidget {
   const YoutubeVideosTab({Key? key}) : super(key: key);
@@ -123,7 +123,7 @@ class _YoutubeVideosTabState extends State<YoutubeVideosTab>
           if (item is _ChannelHeader) {
             return _ChannelHeaderTile(header: item);
           } else if (item is BaseItemDto) {
-            return SongListTile(item: item, isSong: true);
+            return VideoProgressTile(item: item);
           }
           return const SizedBox.shrink();
         },
