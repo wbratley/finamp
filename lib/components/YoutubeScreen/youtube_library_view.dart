@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'youtube_channels_tab.dart';
+import 'youtube_continue_tab.dart';
 import 'youtube_videos_tab.dart';
 
 class YoutubeLibraryView extends StatefulWidget {
@@ -13,7 +14,7 @@ class YoutubeLibraryView extends StatefulWidget {
 class _YoutubeLibraryViewState extends State<YoutubeLibraryView>
     with TickerProviderStateMixin {
   late final TabController _tabController =
-      TabController(length: 2, vsync: this);
+      TabController(length: 3, vsync: this);
 
   @override
   void dispose() {
@@ -28,6 +29,7 @@ class _YoutubeLibraryViewState extends State<YoutubeLibraryView>
         TabBar(
           controller: _tabController,
           tabs: const [
+            Tab(text: 'CONTINUE'),
             Tab(text: 'CHANNELS'),
             Tab(text: 'VIDEOS'),
           ],
@@ -38,6 +40,7 @@ class _YoutubeLibraryViewState extends State<YoutubeLibraryView>
           child: TabBarView(
             controller: _tabController,
             children: const [
+              YoutubeContinueTab(),
               YoutubeChannelsTab(),
               YoutubeVideosTab(),
             ],
