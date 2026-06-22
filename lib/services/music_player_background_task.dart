@@ -11,6 +11,7 @@ import 'package:logging/logging.dart';
 
 import '../models/finamp_models.dart';
 import '../models/jellyfin_models.dart';
+import 'downloads_helper.dart';
 import 'finamp_settings_helper.dart';
 import 'finamp_user_helper.dart';
 import 'jellyfin_api_helper.dart';
@@ -98,6 +99,15 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   final _jellyfinApiHelper = GetIt.instance<JellyfinApiHelper>();
   final _offlineListenLogHelper = GetIt.instance<OfflineListenLogHelper>();
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
+  final _downloadsHelper = GetIt.instance<DownloadsHelper>();
+
+  static const _autoPlaylistsId = '__AA_PLAYLISTS__';
+  static const _autoAlbumsId = '__AA_ALBUMS__';
+  static const _autoArtistsId = '__AA_ARTISTS__';
+  static const _autoFavoritesId = '__AA_FAVORITES__';
+  static const _autoPlaylistPrefix = 'aa_playlist:';
+  static const _autoAlbumPrefix = 'aa_album:';
+  static const _autoArtistPrefix = 'aa_artist:';
 
   /// Set when shuffle mode is changed. If true, [onUpdateQueue] will create a
   /// shuffled [ConcatenatingAudioSource].
@@ -444,6 +454,352 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       return Future.error(e);
     }
   }
+
+  // ── Android Auto / MediaBrowser browsing ──────────────────────────────────
+
+  @override
+  Future<List<MediaItem>> getChildren(
+    String parentMediaId, [
+    Map<String, dynamic>? options,
+  ]) async {
+    if (_finampUserHelper.currentUser == null) return [];
+    try {
+      switch (parentMediaId) {
+        case AudioHandler.browsableRootId:
+          return _getAutoRootItems();
+        case _autoPlaylistsId:
+          return _getAutoPlaylists();
+        case _autoAlbumsId:
+          return _getAutoAlbums();
+        case _autoArtistsId:
+          return _getAutoArtists();
+        case _autoFavoritesId:
+          return _getAutoFavoriteSongs();
+        default:
+          if (parentMediaId.startsWith(_autoPlaylistPrefix)) {
+            return _getAutoPlaylistSongs(
+                parentMediaId.substring(_autoPlaylistPrefix.length));
+          } else if (parentMediaId.startsWith(_autoAlbumPrefix)) {
+            return _getAutoAlbumSongs(
+                parentMediaId.substring(_autoAlbumPrefix.length));
+          } else if (parentMediaId.startsWith(_autoArtistPrefix)) {
+            return _getAutoArtistSongs(
+                parentMediaId.substring(_autoArtistPrefix.length));
+          }
+          return [];
+      }
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger.severe('getChildren error: $e');
+      return [];
+    }
+  }
+
+  @override
+  Future<void> playMediaItem(MediaItem mediaItem) async {
+    try {
+      final parentId = mediaItem.extras?['autoParentId'] as String?;
+      final parentType = mediaItem.extras?['autoParentType'] as String?;
+      final startIndex = (mediaItem.extras?['autoQueueIndex'] as int?) ?? 0;
+
+      List<BaseItemDto>? songs;
+
+      if (parentType == 'playlist') {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: parentId!, type: 'Playlist'),
+          includeItemTypes: 'Audio',
+          isGenres: false,
+        );
+      } else if (parentType == 'album') {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: parentId!),
+          includeItemTypes: 'Audio',
+          isGenres: false,
+          sortBy: 'ParentIndexNumber,IndexNumber',
+        );
+      } else if (parentType == 'artist') {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: parentId!, type: 'MusicArtist'),
+          includeItemTypes: 'Audio',
+          isGenres: false,
+          sortBy: 'Random',
+          limit: 100,
+        );
+      } else if (parentType == 'favorites') {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: _finampUserHelper.currentUser!.currentView,
+          includeItemTypes: 'Audio',
+          isGenres: false,
+          filters: 'IsFavorite',
+          sortBy: 'Random',
+        );
+      } else {
+        final rawJson = mediaItem.extras?['itemJson'];
+        if (rawJson != null) {
+          songs = [BaseItemDto.fromJson(Map<String, dynamic>.from(rawJson as Map))];
+        }
+      }
+
+      if (songs != null && songs.isNotEmpty) {
+        final queue = <MediaItem>[];
+        for (final song in songs) {
+          try {
+            queue.add(await _buildPlaybackMediaItem(song));
+          } catch (e) {
+            _audioServiceBackgroundTaskLogger
+                .warning('Skipping song ${song.id}: $e');
+          }
+        }
+        if (queue.isEmpty) return;
+        setNextInitialIndex(startIndex.clamp(0, queue.length - 1));
+        await updateQueue(queue);
+        await setShuffleMode(AudioServiceShuffleMode.none);
+        play();
+      }
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger.severe('playMediaItem error: $e');
+    }
+  }
+
+  @override
+  Future<List<MediaItem>> search(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    if (_finampUserHelper.currentUser == null) return [];
+    try {
+      final songs = await _jellyfinApiHelper.getItems(
+        searchTerm: query,
+        parentItem: _finampUserHelper.currentUser!.currentView,
+        includeItemTypes: 'Audio',
+        isGenres: false,
+        recursive: true,
+        limit: 50,
+      );
+      if (songs == null) return [];
+      return songs
+          .map((song) => _buildBrowseSongItem(song, 0, null, null))
+          .toList();
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger.severe('search error: $e');
+      return [];
+    }
+  }
+
+  List<MediaItem> _getAutoRootItems() {
+    const listHint = 1; // CONTENT_STYLE_LIST_ITEM_HINT_VALUE
+    const gridHint = 2; // CONTENT_STYLE_GRID_ITEM_HINT_VALUE
+    return [
+      MediaItem(
+        id: _autoPlaylistsId,
+        title: 'Playlists',
+        playable: false,
+        extras: {
+          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
+          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
+        },
+      ),
+      MediaItem(
+        id: _autoAlbumsId,
+        title: 'Albums',
+        playable: false,
+        extras: {
+          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': gridHint,
+          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
+        },
+      ),
+      MediaItem(
+        id: _autoArtistsId,
+        title: 'Artists',
+        playable: false,
+        extras: {
+          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
+          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
+        },
+      ),
+      MediaItem(
+        id: _autoFavoritesId,
+        title: 'Favorites',
+        playable: false,
+        extras: {
+          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
+          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
+        },
+      ),
+    ];
+  }
+
+  Future<List<MediaItem>> _getAutoPlaylists() async {
+    final view = _finampUserHelper.currentUser!.currentView;
+    final playlists = await _jellyfinApiHelper.getItems(
+      parentItem: view,
+      includeItemTypes: 'Playlist',
+      isGenres: false,
+      sortBy: 'SortName',
+    );
+    if (playlists == null) return [];
+    return playlists
+        .map((p) => MediaItem(
+              id: '$_autoPlaylistPrefix${p.id}',
+              title: p.name ?? 'Unknown Playlist',
+              artUri: _jellyfinApiHelper.getImageUrl(item: p),
+              playable: false,
+              extras: const {
+                'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+              },
+            ))
+        .toList();
+  }
+
+  Future<List<MediaItem>> _getAutoPlaylistSongs(String playlistId) async {
+    final songs = await _jellyfinApiHelper.getItems(
+      parentItem: BaseItemDto(id: playlistId, type: 'Playlist'),
+      includeItemTypes: 'Audio',
+      isGenres: false,
+    );
+    if (songs == null) return [];
+    return List.generate(
+        songs.length, (i) => _buildBrowseSongItem(songs[i], i, playlistId, 'playlist'));
+  }
+
+  Future<List<MediaItem>> _getAutoAlbums() async {
+    final view = _finampUserHelper.currentUser!.currentView;
+    final albums = await _jellyfinApiHelper.getItems(
+      parentItem: view,
+      includeItemTypes: 'MusicAlbum',
+      isGenres: false,
+      sortBy: 'SortName',
+      recursive: true,
+    );
+    if (albums == null) return [];
+    return albums
+        .map((a) => MediaItem(
+              id: '$_autoAlbumPrefix${a.id}',
+              title: a.name ?? 'Unknown Album',
+              artist: a.albumArtist,
+              artUri: _jellyfinApiHelper.getImageUrl(item: a),
+              playable: false,
+              extras: const {
+                'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+              },
+            ))
+        .toList();
+  }
+
+  Future<List<MediaItem>> _getAutoAlbumSongs(String albumId) async {
+    final songs = await _jellyfinApiHelper.getItems(
+      parentItem: BaseItemDto(id: albumId),
+      includeItemTypes: 'Audio',
+      isGenres: false,
+      sortBy: 'ParentIndexNumber,IndexNumber',
+    );
+    if (songs == null) return [];
+    return List.generate(
+        songs.length, (i) => _buildBrowseSongItem(songs[i], i, albumId, 'album'));
+  }
+
+  Future<List<MediaItem>> _getAutoArtists() async {
+    final view = _finampUserHelper.currentUser!.currentView;
+    final artists = await _jellyfinApiHelper.getItems(
+      parentItem: view,
+      includeItemTypes: 'MusicArtist',
+      isGenres: false,
+      sortBy: 'SortName',
+    );
+    if (artists == null) return [];
+    return artists
+        .map((a) => MediaItem(
+              id: '$_autoArtistPrefix${a.id}',
+              title: a.name ?? 'Unknown Artist',
+              artUri: _jellyfinApiHelper.getImageUrl(item: a),
+              playable: false,
+              extras: const {
+                'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+              },
+            ))
+        .toList();
+  }
+
+  Future<List<MediaItem>> _getAutoArtistSongs(String artistId) async {
+    final songs = await _jellyfinApiHelper.getItems(
+      parentItem: BaseItemDto(id: artistId, type: 'MusicArtist'),
+      includeItemTypes: 'Audio',
+      isGenres: false,
+      sortBy: 'Random',
+      limit: 100,
+    );
+    if (songs == null) return [];
+    return List.generate(
+        songs.length, (i) => _buildBrowseSongItem(songs[i], i, artistId, 'artist'));
+  }
+
+  Future<List<MediaItem>> _getAutoFavoriteSongs() async {
+    final songs = await _jellyfinApiHelper.getItems(
+      parentItem: _finampUserHelper.currentUser!.currentView,
+      includeItemTypes: 'Audio',
+      isGenres: false,
+      filters: 'IsFavorite',
+      sortBy: 'Random',
+    );
+    if (songs == null) return [];
+    return List.generate(
+        songs.length, (i) => _buildBrowseSongItem(songs[i], i, null, 'favorites'));
+  }
+
+  MediaItem _buildBrowseSongItem(
+    BaseItemDto song,
+    int index,
+    String? parentId,
+    String? parentType,
+  ) {
+    return MediaItem(
+      id: 'aa_song:${song.id}',
+      title: song.name ?? 'Unknown',
+      album: song.album,
+      artist: song.artists?.join(', ') ?? song.albumArtist,
+      artUri: _jellyfinApiHelper.getImageUrl(item: song),
+      duration: song.runTimeTicks == null
+          ? null
+          : Duration(microseconds: song.runTimeTicks! ~/ 10),
+      playable: true,
+      extras: {
+        'itemJson': song.toJson(),
+        'shouldTranscode': FinampSettingsHelper.finampSettings.shouldTranscode,
+        'isOffline': FinampSettingsHelper.finampSettings.isOffline,
+        'downloadedSongJson': null,
+        if (parentId != null) 'autoParentId': parentId,
+        if (parentType != null) 'autoParentType': parentType,
+        'autoQueueIndex': index,
+        'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+      },
+    );
+  }
+
+  Future<MediaItem> _buildPlaybackMediaItem(BaseItemDto item) async {
+    final downloadedSong = _downloadsHelper.getDownloadedSong(item.id);
+    final isDownloaded = downloadedSong == null
+        ? false
+        : await _downloadsHelper.verifyDownloadedSong(downloadedSong);
+
+    return MediaItem(
+      id: item.id,
+      album: item.album ?? 'Unknown Album',
+      artist: item.artists?.join(', ') ?? item.albumArtist,
+      artUri: _downloadsHelper.getDownloadedImage(item)?.file.uri ??
+          _jellyfinApiHelper.getImageUrl(item: item),
+      title: item.name ?? 'Unknown',
+      duration: item.runTimeTicks == null
+          ? null
+          : Duration(microseconds: item.runTimeTicks! ~/ 10),
+      extras: {
+        'itemJson': item.toJson(),
+        'shouldTranscode': FinampSettingsHelper.finampSettings.shouldTranscode,
+        'downloadedSongJson': isDownloaded ? downloadedSong!.toJson() : null,
+        'isOffline': FinampSettingsHelper.finampSettings.isOffline,
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
 
   /// Report track changes to the Jellyfin Server if the user is not offline.
   Future<void> onTrackChanged(
