@@ -398,6 +398,19 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
     }
   }
 
+  Future<void> seekRelative(Duration offset) async {
+    try {
+      var newPosition = _player.position + offset;
+      if (newPosition < Duration.zero) newPosition = Duration.zero;
+      final duration = _player.duration;
+      if (duration != null && newPosition > duration) newPosition = duration;
+      await _player.seek(newPosition);
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger.severe(e);
+      return Future.error(e);
+    }
+  }
+
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
     try {
