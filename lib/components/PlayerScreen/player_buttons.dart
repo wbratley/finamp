@@ -4,6 +4,7 @@ import 'package:get_it/get_it.dart';
 import 'package:finamp/l10n/app_localizations.dart';
 
 import '../../services/music_player_background_task.dart';
+import '../../services/progress_state_stream.dart';
 
 class PlayerButtons extends StatelessWidget {
   const PlayerButtons({Key? key}) : super(key: key);
@@ -11,10 +12,13 @@ class PlayerButtons extends StatelessWidget {
   Widget build(BuildContext context) {
     final audioHandler = GetIt.instance<MusicPlayerBackgroundTask>();
 
-    return StreamBuilder<PlaybackState>(
-      stream: audioHandler.playbackState,
+    return StreamBuilder<ProgressState>(
+      stream: progressStateStream,
       builder: (context, snapshot) {
-        final PlaybackState? playbackState = snapshot.data;
+        final PlaybackState? playbackState = snapshot.data?.playbackState;
+        final bool isVideo =
+            snapshot.data?.mediaItem?.extras?["itemJson"]?["Type"] == "Video";
+
         return Row(
           mainAxisSize: MainAxisSize.max,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -44,14 +48,25 @@ class PlayerButtons extends StatelessWidget {
                   : null,
               iconSize: 20,
             ),
-            IconButton(
-              tooltip: AppLocalizations.of(context)!.skipToPrevious,
-              icon: const Icon(Icons.skip_previous),
-              onPressed: playbackState != null
-                  ? () async => await audioHandler.skipToPrevious()
-                  : null,
-              iconSize: 36,
-            ),
+            if (isVideo)
+              IconButton(
+                tooltip: AppLocalizations.of(context)!.seekBackward10,
+                icon: const Icon(Icons.replay_10),
+                onPressed: playbackState != null
+                    ? () async => audioHandler
+                        .seekRelative(const Duration(seconds: -10))
+                    : null,
+                iconSize: 36,
+              )
+            else
+              IconButton(
+                tooltip: AppLocalizations.of(context)!.skipToPrevious,
+                icon: const Icon(Icons.skip_previous),
+                onPressed: playbackState != null
+                    ? () async => await audioHandler.skipToPrevious()
+                    : null,
+                iconSize: 36,
+              ),
             SizedBox(
               height: 56,
               width: 56,
@@ -80,13 +95,24 @@ class PlayerButtons extends StatelessWidget {
                 ),
               ),
             ),
-            IconButton(
-                tooltip: AppLocalizations.of(context)!.skipToNext,
-                icon: const Icon(Icons.skip_next),
+            if (isVideo)
+              IconButton(
+                tooltip: AppLocalizations.of(context)!.seekForward10,
+                icon: const Icon(Icons.forward_10),
                 onPressed: playbackState != null
-                    ? () async => audioHandler.skipToNext()
+                    ? () async => audioHandler
+                        .seekRelative(const Duration(seconds: 10))
                     : null,
-                iconSize: 36),
+                iconSize: 36,
+              )
+            else
+              IconButton(
+                  tooltip: AppLocalizations.of(context)!.skipToNext,
+                  icon: const Icon(Icons.skip_next),
+                  onPressed: playbackState != null
+                      ? () async => audioHandler.skipToNext()
+                      : null,
+                  iconSize: 36),
             IconButton(
               tooltip: playbackState?.repeatMode == AudioServiceRepeatMode.all
                   ? AppLocalizations.of(context)!.loopModeAllTooltip
