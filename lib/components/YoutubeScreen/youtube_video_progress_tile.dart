@@ -21,7 +21,11 @@ class VideoProgressTile extends StatelessWidget {
 
     return Stack(
       children: [
-        SongListTile(item: item, isSong: true),
+        SongListTile(
+          item: item,
+          isSong: true,
+          startPositionTicks: showBar ? positionTicks : null,
+        ),
         if (showBar)
           Positioned(
             left: 0,
