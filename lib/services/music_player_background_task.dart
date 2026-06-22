@@ -101,6 +101,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
   final _downloadsHelper = GetIt.instance<DownloadsHelper>();
 
+  static const _browsableRootId = '__browsable_root__';
   static const _autoPlaylistsId = '__AA_PLAYLISTS__';
   static const _autoAlbumsId = '__AA_ALBUMS__';
   static const _autoArtistsId = '__AA_ARTISTS__';
@@ -478,7 +479,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
     if (_finampUserHelper.currentUser == null) return [];
     try {
       switch (parentMediaId) {
-        case AudioHandler.browsableRootId:
+        case _browsableRootId:
           return _getAutoRootItems();
         case _autoPlaylistsId:
           return _getAutoPlaylists();
@@ -806,7 +807,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       extras: {
         'itemJson': item.toJson(),
         'shouldTranscode': FinampSettingsHelper.finampSettings.shouldTranscode,
-        'downloadedSongJson': isDownloaded ? downloadedSong!.toJson() : null,
+        'downloadedSongJson': isDownloaded ? downloadedSong.toJson() : null,
         'isOffline': FinampSettingsHelper.finampSettings.isOffline,
       },
     );
