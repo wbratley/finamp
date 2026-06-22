@@ -24,6 +24,7 @@ class AudioServiceHelper {
     required List<BaseItemDto> itemList,
     int initialIndex = 0,
     bool shuffle = false,
+    int? startPositionTicks,
   }) async {
     try {
       if (initialIndex > itemList.length) {
@@ -48,6 +49,13 @@ class AudioServiceHelper {
       //   // anywhere in this app so oh well).
       _audioHandler.setNextInitialIndex(initialIndex);
       // }
+
+      if (startPositionTicks != null && startPositionTicks > 0) {
+        // Jellyfin ticks are 100-nanosecond units; convert to microseconds
+        _audioHandler.setNextInitialPosition(
+          Duration(microseconds: startPositionTicks ~/ 10),
+        );
+      }
 
       await _audioHandler.updateQueue(queue);
 

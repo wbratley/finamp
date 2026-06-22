@@ -118,6 +118,9 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   /// new queue.
   int? nextInitialIndex;
 
+  /// Set when creating a new queue to resume from a saved position.
+  Duration? nextInitialPosition;
+
   /// Set to true when we're stopping the audio service. Used to avoid playback
   /// progress reporting.
   bool _isStopping = false;
@@ -313,6 +316,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
         await _player.setAudioSource(
           _queueAudioSource,
           initialIndex: nextInitialIndex,
+          initialPosition: nextInitialPosition,
         );
       } on PlayerException catch (e) {
         _audioServiceBackgroundTaskLogger
@@ -350,6 +354,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
 
       shuffleNextQueue = false;
       nextInitialIndex = null;
+      nextInitialPosition = null;
     } catch (e) {
       _audioServiceBackgroundTaskLogger.severe(e);
       return Future.error(e);
@@ -942,6 +947,10 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
 
   void setNextInitialIndex(int index) {
     nextInitialIndex = index;
+  }
+
+  void setNextInitialPosition(Duration position) {
+    nextInitialPosition = position;
   }
 
   Future<void> reorderQueue(int oldIndex, int newIndex) async {

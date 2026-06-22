@@ -53,6 +53,9 @@ class SongListTile extends StatefulWidget {
     /// Whether this widget is being displayed in a playlist. If true, will show
     /// the remove from playlist button.
     this.isInPlaylist = false,
+
+    /// If set, playback will resume from this position (in Jellyfin ticks).
+    this.startPositionTicks,
   }) : super(key: key);
 
   final BaseItemDto item;
@@ -63,6 +66,7 @@ class SongListTile extends StatefulWidget {
   final bool showArtists;
   final VoidCallback? onDelete;
   final bool isInPlaylist;
+  final int? startPositionTicks;
 
   @override
   State<SongListTile> createState() => _SongListTileState();
@@ -208,6 +212,7 @@ class _SongListTileState extends State<SongListTile> {
               _audioServiceHelper.replaceQueueWithItem(
                 itemList: widget.children ?? [widget.item],
                 initialIndex: widget.index ?? 0,
+                startPositionTicks: widget.startPositionTicks,
               );
             },
           );
