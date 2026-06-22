@@ -4,9 +4,11 @@ import '../../models/jellyfin_models.dart';
 import '../AlbumScreen/song_list_tile.dart';
 
 class VideoProgressTile extends StatelessWidget {
-  const VideoProgressTile({Key? key, required this.item}) : super(key: key);
+  const VideoProgressTile({Key? key, required this.item, this.onTap})
+      : super(key: key);
 
   final BaseItemDto item;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -21,7 +23,7 @@ class VideoProgressTile extends StatelessWidget {
 
     return Stack(
       children: [
-        SongListTile(item: item, isSong: true),
+        SongListTile(item: item, isSong: true, onTap: onTap),
         if (showBar)
           Positioned(
             left: 0,
