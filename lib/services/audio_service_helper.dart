@@ -24,6 +24,7 @@ class AudioServiceHelper {
     required List<BaseItemDto> itemList,
     int initialIndex = 0,
     bool shuffle = false,
+    Duration? startPosition,
   }) async {
     try {
       if (initialIndex > itemList.length) {
@@ -58,6 +59,9 @@ class AudioServiceHelper {
       }
 
       _audioHandler.play();
+      if (startPosition != null && startPosition > Duration.zero) {
+        await _audioHandler.seek(startPosition);
+      }
     } catch (e) {
       audioServiceHelperLogger.severe(e);
       return Future.error(e);

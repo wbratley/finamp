@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 
 import '../../models/jellyfin_models.dart';
+import '../../services/audio_service_helper.dart';
 import '../../services/finamp_user_helper.dart';
 import '../../services/jellyfin_api_helper.dart';
 import '../error_snackbar.dart';
@@ -18,6 +19,7 @@ class _YoutubeContinueTabState extends State<YoutubeContinueTab>
     with AutomaticKeepAliveClientMixin {
   final _jellyfinApiHelper = GetIt.instance<JellyfinApiHelper>();
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
+  final _audioServiceHelper = GetIt.instance<AudioServiceHelper>();
 
   bool _isLoading = true;
   List<BaseItemDto> _videos = [];
@@ -56,6 +58,16 @@ class _YoutubeContinueTabState extends State<YoutubeContinueTab>
     }
   }
 
+  Future<void> _resumeVideo(BaseItemDto item) async {
+    final positionTicks = item.userData?.playbackPositionTicks ?? 0;
+    await _audioServiceHelper.replaceQueueWithItem(
+      itemList: [item],
+      startPosition: positionTicks > 0
+          ? Duration(microseconds: positionTicks ~/ 10)
+          : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -77,7 +89,10 @@ class _YoutubeContinueTabState extends State<YoutubeContinueTab>
       onRefresh: _loadVideos,
       child: ListView.builder(
         itemCount: _videos.length,
-        itemBuilder: (_, index) => VideoProgressTile(item: _videos[index]),
+        itemBuilder: (_, index) => VideoProgressTile(
+          item: _videos[index],
+          onTap: () => _resumeVideo(_videos[index]),
+        ),
       ),
     );
   }
