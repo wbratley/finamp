@@ -178,7 +178,9 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       }
     });
 
-    // PlaybackEvent doesn't include shuffle/loops so we listen for changes here
+    // PlaybackEvent doesn't include playing/shuffle/loops so we listen for changes here
+    _player.playingStream.listen(
+        (_) => playbackState.add(_transformEvent(_player.playbackEvent)));
     _player.shuffleModeEnabledStream.listen(
         (_) => playbackState.add(_transformEvent(_player.playbackEvent)));
     _player.loopModeStream.listen(
