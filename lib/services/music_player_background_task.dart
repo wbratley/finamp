@@ -132,6 +132,9 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   Duration _sleepTimerDuration = Duration.zero;
   final ValueNotifier<Timer?> _sleepTimer = ValueNotifier<Timer?>(null);
 
+  /// Fires every 10 seconds while playing to keep Jellyfin progress in sync.
+  Timer? _periodicProgressTimer;
+
   List<int>? get shuffleIndices => _player.shuffleIndices;
 
   ValueListenable<Timer?> get sleepTimer => _sleepTimer;
@@ -179,12 +182,33 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
     });
 
     // PlaybackEvent doesn't include playing/shuffle/loops so we listen for changes here
-    _player.playingStream.listen(
-        (_) => playbackState.add(_transformEvent(_player.playbackEvent)));
+    _player.playingStream.listen((playing) {
+      playbackState.add(_transformEvent(_player.playbackEvent));
+      if (playing) {
+        _startProgressTimer();
+      } else {
+        _stopProgressTimer();
+      }
+    });
     _player.shuffleModeEnabledStream.listen(
         (_) => playbackState.add(_transformEvent(_player.playbackEvent)));
     _player.loopModeStream.listen(
         (_) => playbackState.add(_transformEvent(_player.playbackEvent)));
+  }
+
+  void _startProgressTimer() {
+    _periodicProgressTimer?.cancel();
+    _periodicProgressTimer =
+        Timer.periodic(const Duration(seconds: 10), (_) async {
+      if (!FinampSettingsHelper.finampSettings.isOffline && !_isStopping) {
+        await _updatePlaybackProgress();
+      }
+    });
+  }
+
+  void _stopProgressTimer() {
+    _periodicProgressTimer?.cancel();
+    _periodicProgressTimer = null;
   }
 
   @override
@@ -238,6 +262,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
 
       _sleepTimer.value?.cancel();
       _sleepTimer.value = null;
+      _stopProgressTimer();
 
       await super.stop();
 
@@ -882,9 +907,11 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
         isMuted: isMuted,
         positionTicks: playerPosition.inMicroseconds * 10,
         repeatMode: repeatMode,
-        playMethod: item.extras!["shouldTranscode"] ?? false
-            ? "Transcode"
-            : "DirectPlay",
+        playMethod:
+            (item.extras!["shouldTranscode"] ?? false) ||
+                    item.extras!["itemJson"]["Type"] == "Video"
+                ? "Transcode"
+                : "DirectPlay",
         // We don't send the queue since it seems useless and it can cause
         // issues with large queues.
         // https://github.com/jmshrv/finamp/issues/387
