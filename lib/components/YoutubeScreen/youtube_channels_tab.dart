@@ -6,7 +6,6 @@ import '../../screens/youtube_channel_screen.dart';
 import '../../services/finamp_user_helper.dart';
 import '../../services/jellyfin_api_helper.dart';
 import '../album_image.dart';
-import '../error_snackbar.dart';
 
 class YoutubeChannelsTab extends StatefulWidget {
   const YoutubeChannelsTab({Key? key}) : super(key: key);
@@ -21,6 +20,7 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
 
   bool _isLoading = true;
+  String? _error;
   List<BaseItemDto> _channels = [];
 
   @override
@@ -33,7 +33,11 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
   }
 
   Future<void> _loadChannels() async {
-    setState(() => _isLoading = true);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       // Fetch only the direct child folders of the library root.
       // Pinchflat structure: Library/<Channel>/<Date Subfolder>/<video>
@@ -50,13 +54,17 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
         startIndex: 0,
       );
 
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
         _channels = folders ?? [];
       });
     } catch (e) {
-      errorSnackbar(e, context);
-      setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = e.toString();
+      });
     }
   }
 
@@ -66,6 +74,37 @@ class _YoutubeChannelsTabState extends State<YoutubeChannelsTab>
 
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator.adaptive());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                'Failed to load channels',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _loadChannels,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     if (_channels.isEmpty) {
