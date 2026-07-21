@@ -48,26 +48,51 @@ class _YoutubeChannelScreenState extends State<YoutubeChannelScreen> {
   Future<void> _loadVideos() async {
     setState(() => _isLoading = true);
     try {
-      // Fetch videos scoped to the channel folder directly — no filtering needed
-      final videos = await _jellyfinApiHelper.getItems(
-        parentItem: _args.folder,
-        includeItemTypes: 'Video',
-        sortBy: 'PremiereDate',
-        sortOrder: 'Descending',
-        isGenres: false,
-        limit: 10000,
-        startIndex: 0,
-      );
+      List<BaseItemDto> videos;
+      if (FinampSettingsHelper.finampSettings.isOffline) {
+        // Offline mode: only show videos that are actually downloaded for
+        // this channel, whether they were downloaded individually or as
+        // part of a channel-wide download.
+        final downloadedVideos = <String, BaseItemDto>{};
+
+        final downloadedParent =
+            _downloadsHelper.getDownloadedParent(_args.folder.id);
+        if (downloadedParent != null) {
+          downloadedVideos.addEntries(downloadedParent.downloadedChildren.entries);
+        }
+
+        for (final downloadedItem in _downloadsHelper.downloadedItems) {
+          if (downloadedItem.song.parentId == _args.folder.id) {
+            downloadedVideos[downloadedItem.song.id] = downloadedItem.song;
+          }
+        }
+
+        videos = downloadedVideos.values.toList()
+          ..sort((a, b) =>
+              (b.premiereDate ?? '').compareTo(a.premiereDate ?? ''));
+      } else {
+        // Fetch videos scoped to the channel folder directly — no filtering needed
+        videos = await _jellyfinApiHelper.getItems(
+              parentItem: _args.folder,
+              includeItemTypes: 'Video',
+              sortBy: 'PremiereDate',
+              sortOrder: 'Descending',
+              isGenres: false,
+              limit: 10000,
+              startIndex: 0,
+            ) ??
+            [];
+      }
 
       // Stamp channel name so SongListTile subtitle shows correctly
       final channelName = _args.folder.name;
-      for (final video in videos ?? []) {
+      for (final video in videos) {
         video.channelName = channelName;
       }
 
       setState(() {
         _isLoading = false;
-        _videos = videos ?? [];
+        _videos = videos;
       });
     } catch (e) {
       errorSnackbar(e, context);

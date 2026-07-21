@@ -73,8 +73,11 @@ class DownloadsHelper {
       }
     }
 
+    final bool parentAlreadyExisted =
+        _downloadedParentsBox.containsKey(parent.id);
+
     try {
-      if (!_downloadedParentsBox.containsKey(parent.id)) {
+      if (!parentAlreadyExisted) {
         // If the current album doesn't exist, add the album to the box of albums
         _downloadsLogger.info(
             "Album ${parent.name} (${parent.id}) not in albums box, adding now.");
@@ -221,6 +224,15 @@ class DownloadsHelper {
       }
     } catch (e) {
       _downloadsLogger.severe(e);
+      // If we created a new parent entry for this download and the failure
+      // happened before any child was actually added to it, don't leave a
+      // dangling empty entry behind in the downloads screen.
+      if (!parentAlreadyExisted) {
+        final createdParent = _downloadedParentsBox.get(parent.id);
+        if (createdParent != null && createdParent.downloadedChildren.isEmpty) {
+          await _downloadedParentsBox.delete(parent.id);
+        }
+      }
       return Future.error(e);
     }
   }
@@ -250,8 +262,15 @@ class DownloadsHelper {
 
   Future<void> removeChildFromParent({required String parentId, required List<String> childIds}) async {
     var album = _downloadedParentsBox.get(parentId);
-    for (String childId in childIds) {
-      album?.downloadedChildren.removeWhere((key, value) => key == childId);
+    if (album != null) {
+      for (String childId in childIds) {
+        album.downloadedChildren.removeWhere((key, value) => key == childId);
+      }
+      // DownloadedParent isn't a HiveObject, so mutating downloadedChildren
+      // in place doesn't persist the change. Without this put, the removed
+      // child reappears (with no matching DownloadedSong) the next time the
+      // parent is loaded from disk.
+      await _downloadedParentsBox.put(parentId, album);
     }
   }
 
