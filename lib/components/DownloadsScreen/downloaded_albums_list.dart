@@ -42,33 +42,55 @@ class _DownloadedAlbumsListState extends State<DownloadedAlbumsList> {
       delegate: SliverChildBuilderDelegate(
         (context, index) {
           DownloadedParent album = downloadedParents.elementAt(index);
+
+          final deleteButton = IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () => showDialog(
+              context: context,
+              builder: (context) => ConfirmationPromptDialog(
+                promptText: AppLocalizations.of(context)!.deleteDownloadsPrompt(
+                    album.item.name ?? "",
+                    album.item.type == "Playlist" ? "playlist" : "album"),
+                confirmButtonText: AppLocalizations.of(context)!
+                    .deleteDownloadsConfirmButtonText,
+                abortButtonText: AppLocalizations.of(context)!
+                    .deleteDownloadsAbortButtonText,
+                onConfirmed: () async {
+                  await deleteAlbum(context, album);
+                  setState(() {});
+                },
+                onAborted: () {},
+              ),
+            ),
+          );
+
+          // Items downloaded on their own (e.g. individual videos/songs, not
+          // as part of an album or playlist) are stored as a DownloadedParent
+          // whose only child is the item itself. Rendering those as an
+          // ExpansionTile just reveals the same item again as a "child", so
+          // show them as a flat row instead. This also covers downloads that
+          // failed before any child was added, leaving an empty parent.
+          final isStandaloneItem = album.downloadedChildren.isEmpty ||
+              (album.downloadedChildren.length == 1 &&
+                  album.downloadedChildren.containsKey(album.item.id));
+
+          if (isStandaloneItem) {
+            return ListTile(
+              key: PageStorageKey(album.item.id),
+              leading: AlbumImage(item: album.item),
+              title: Text(album.item.name ?? "Unknown Name"),
+              subtitle: album.downloadedChildren.isEmpty
+                  ? const Text("Download failed")
+                  : ItemMediaSourceInfo(songId: album.item.id),
+              trailing: deleteButton,
+            );
+          }
+
           return ExpansionTile(
             key: PageStorageKey(album.item.id),
             leading: AlbumImage(item: album.item),
             title: Text(album.item.name ?? "Unknown Name"),
-            trailing: IconButton(
-                icon: const Icon(Icons.delete),
-                onPressed: () => showDialog(
-                  context: context,
-                  builder: (context) => ConfirmationPromptDialog(
-                    promptText: AppLocalizations.of(context)!
-                        .deleteDownloadsPrompt(
-                            album.item.name ?? "",
-                            album.item.type == "Playlist"
-                                ? "playlist"
-                                : "album"),
-                    confirmButtonText: AppLocalizations.of(context)!
-                        .deleteDownloadsConfirmButtonText,
-                    abortButtonText: AppLocalizations.of(context)!
-                        .deleteDownloadsAbortButtonText,
-                    onConfirmed: () async {
-                      await deleteAlbum(context, album);
-                      setState(() {});
-                    },
-                    onAborted: () {},
-                  ),
-                ),
-            ),
+            trailing: deleteButton,
             subtitle: AlbumFileSize(
               downloadedParent: album,
             ),
@@ -140,8 +162,10 @@ class _DownloadedSongsInAlbumListState
   }
 
   Future<void> deleteSong(BuildContext context, BaseItemDto itemDto) async {
-    widget.parent.downloadedChildren
-        .removeWhere((key, value) => value == itemDto);
+    await downloadsHelper.removeChildFromParent(
+      parentId: widget.parent.item.id,
+      childIds: [itemDto.id],
+    );
     await downloadsHelper.deleteSong(jellyfinItemId: itemDto.id);
   }
 }
