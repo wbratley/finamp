@@ -101,14 +101,15 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
   final _downloadsHelper = GetIt.instance<DownloadsHelper>();
 
-  static const _browsableRootId = '__browsable_root__';
   static const _autoPlaylistsId = '__AA_PLAYLISTS__';
   static const _autoAlbumsId = '__AA_ALBUMS__';
   static const _autoArtistsId = '__AA_ARTISTS__';
   static const _autoFavoritesId = '__AA_FAVORITES__';
+  static const _autoChannelsId = '__AA_CHANNELS__';
   static const _autoPlaylistPrefix = 'aa_playlist:';
   static const _autoAlbumPrefix = 'aa_album:';
   static const _autoArtistPrefix = 'aa_artist:';
+  static const _autoChannelPrefix = 'aa_channel:';
 
   /// Set when shuffle mode is changed. If true, [onUpdateQueue] will create a
   /// shuffled [ConcatenatingAudioSource].
@@ -511,7 +512,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
     if (_finampUserHelper.currentUser == null) return [];
     try {
       switch (parentMediaId) {
-        case _browsableRootId:
+        case AudioService.browsableRootId:
           return _getAutoRootItems();
         case _autoPlaylistsId:
           return _getAutoPlaylists();
@@ -521,6 +522,8 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
           return _getAutoArtists();
         case _autoFavoritesId:
           return _getAutoFavoriteSongs();
+        case _autoChannelsId:
+          return _getAutoChannels();
         default:
           if (parentMediaId.startsWith(_autoPlaylistPrefix)) {
             return _getAutoPlaylistSongs(
@@ -531,6 +534,9 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
           } else if (parentMediaId.startsWith(_autoArtistPrefix)) {
             return _getAutoArtistSongs(
                 parentMediaId.substring(_autoArtistPrefix.length));
+          } else if (parentMediaId.startsWith(_autoChannelPrefix)) {
+            return _getAutoChannelVideos(
+                parentMediaId.substring(_autoChannelPrefix.length));
           }
           return [];
       }
@@ -577,6 +583,14 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
           isGenres: false,
           filters: 'IsFavorite',
           sortBy: 'Random',
+        );
+      } else if (parentType == 'channel') {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: parentId!),
+          includeItemTypes: 'Video',
+          isGenres: false,
+          sortBy: 'PremiereDate',
+          sortOrder: 'Descending',
         );
       } else {
         final rawJson = mediaItem.extras?['itemJson'];
@@ -665,6 +679,15 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       MediaItem(
         id: _autoFavoritesId,
         title: 'Favorites',
+        playable: false,
+        extras: {
+          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
+          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
+        },
+      ),
+      MediaItem(
+        id: _autoChannelsId,
+        title: 'Channels',
         playable: false,
         extras: {
           'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
@@ -778,6 +801,42 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
         songs.length, (i) => _buildBrowseSongItem(songs[i], i, artistId, 'artist'));
   }
 
+  Future<List<MediaItem>> _getAutoChannels() async {
+    final view = _finampUserHelper.currentUser!.currentView;
+    final channels = await _jellyfinApiHelper.getItems(
+      parentItem: view,
+      includeItemTypes: 'Folder',
+      isGenres: false,
+      sortBy: 'SortName',
+      recursive: false,
+    );
+    if (channels == null) return [];
+    return channels
+        .map((c) => MediaItem(
+              id: '$_autoChannelPrefix${c.id}',
+              title: c.name ?? 'Unknown Channel',
+              artUri: _jellyfinApiHelper.getImageUrl(item: c),
+              playable: false,
+              extras: const {
+                'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+              },
+            ))
+        .toList();
+  }
+
+  Future<List<MediaItem>> _getAutoChannelVideos(String channelId) async {
+    final songs = await _jellyfinApiHelper.getItems(
+      parentItem: BaseItemDto(id: channelId),
+      includeItemTypes: 'Video',
+      isGenres: false,
+      sortBy: 'PremiereDate',
+      sortOrder: 'Descending',
+    );
+    if (songs == null) return [];
+    return List.generate(songs.length,
+        (i) => _buildBrowseSongItem(songs[i], i, channelId, 'channel'));
+  }
+
   Future<List<MediaItem>> _getAutoFavoriteSongs() async {
     final songs = await _jellyfinApiHelper.getItems(
       parentItem: _finampUserHelper.currentUser!.currentView,
@@ -791,6 +850,16 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
         songs.length, (i) => _buildBrowseSongItem(songs[i], i, null, 'favorites'));
   }
 
+  /// Videos imported via Pinchflat keep the YouTube video id as a
+  /// `[xxxxxxxxxxx]` suffix on the file/item name; strip it for display,
+  /// matching SongListTile's title formatting.
+  String _displayTitle(BaseItemDto item) {
+    final name = item.name ?? 'Unknown';
+    return item.type == 'Video'
+        ? name.replaceAll(RegExp(r'\s*\[[\w-]{11}\]\s*$'), '')
+        : name;
+  }
+
   MediaItem _buildBrowseSongItem(
     BaseItemDto song,
     int index,
@@ -799,7 +868,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   ) {
     return MediaItem(
       id: 'aa_song:${song.id}',
-      title: song.name ?? 'Unknown',
+      title: _displayTitle(song),
       album: song.album,
       artist: song.artists?.join(', ') ?? song.albumArtist,
       artUri: _jellyfinApiHelper.getImageUrl(item: song),
@@ -832,7 +901,7 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       artist: item.artists?.join(', ') ?? item.albumArtist,
       artUri: _downloadsHelper.getDownloadedImage(item)?.file.uri ??
           _jellyfinApiHelper.getImageUrl(item: item),
-      title: item.name ?? 'Unknown',
+      title: _displayTitle(item),
       duration: item.runTimeTicks == null
           ? null
           : Duration(microseconds: item.runTimeTicks! ~/ 10),
