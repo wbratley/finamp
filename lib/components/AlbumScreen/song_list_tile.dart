@@ -4,12 +4,14 @@ import 'package:get_it/get_it.dart';
 import 'package:intl/intl.dart';
 import 'package:mini_music_visualizer/mini_music_visualizer.dart';
 
+import '../../models/finamp_models.dart';
 import '../../models/jellyfin_models.dart';
 import '../../screens/add_to_playlist_screen.dart';
 import '../../screens/album_screen.dart';
 import '../../services/audio_service_helper.dart';
 import '../../services/downloads_helper.dart';
 import '../../services/finamp_settings_helper.dart';
+import '../../services/finamp_user_helper.dart';
 import '../../services/jellyfin_api_helper.dart';
 import '../../services/media_state_stream.dart';
 import '../../services/process_artist.dart';
@@ -17,6 +19,7 @@ import '../album_image.dart';
 import '../error_snackbar.dart';
 import '../favourite_button.dart';
 import '../print_duration.dart';
+import 'download_dialog.dart';
 import 'downloaded_indicator.dart';
 
 enum SongListTileMenuItems {
@@ -29,6 +32,8 @@ enum SongListTileMenuItems {
   goToAlbum,
   addFavourite,
   removeFavourite,
+  download,
+  removeDownload,
 }
 
 class SongListTile extends StatefulWidget {
@@ -75,6 +80,8 @@ class SongListTile extends StatefulWidget {
 class _SongListTileState extends State<SongListTile> {
   final _audioServiceHelper = GetIt.instance<AudioServiceHelper>();
   final _jellyfinApiHelper = GetIt.instance<JellyfinApiHelper>();
+  final _downloadsHelper = GetIt.instance<DownloadsHelper>();
+  final _finampUserHelper = GetIt.instance<FinampUserHelper>();
 
   @override
   Widget build(BuildContext context) {
@@ -239,6 +246,12 @@ class _SongListTileState extends State<SongListTile> {
         // Some options are disabled in offline mode
         final isOffline = FinampSettingsHelper.finampSettings.isOffline;
 
+        // Videos (e.g. YouTube channel content) don't have an album to
+        // bulk-download from, so we offer a per-item download here instead.
+        final isVideo = widget.item.type == 'Video';
+        final isDownloaded =
+            _downloadsHelper.getDownloadedSong(widget.item.id) != null;
+
         final selection = await showMenu<SongListTileMenuItems>(
           context: context,
           position: RelativeRect.fromLTRB(
@@ -320,6 +333,24 @@ class _SongListTileState extends State<SongListTile> {
                 enabled: canGoToAlbum,
               ),
             ),
+            if (isVideo)
+              isDownloaded
+                  ? PopupMenuItem<SongListTileMenuItems>(
+                      value: SongListTileMenuItems.removeDownload,
+                      child: ListTile(
+                        leading: const Icon(Icons.delete_outline),
+                        title: const Text("Remove download"),
+                      ),
+                    )
+                  : PopupMenuItem<SongListTileMenuItems>(
+                      enabled: !isOffline,
+                      value: SongListTileMenuItems.download,
+                      child: ListTile(
+                        leading: const Icon(Icons.download),
+                        title: const Text("Download"),
+                        enabled: !isOffline,
+                      ),
+                    ),
             widget.item.userData!.isFavorite
                 ? PopupMenuItem<SongListTileMenuItems>(
                     value: SongListTileMenuItems.removeFavourite,
@@ -446,6 +477,44 @@ class _SongListTileState extends State<SongListTile> {
           case SongListTileMenuItems.addFavourite:
           case SongListTileMenuItems.removeFavourite:
             await setFavourite();
+            break;
+          case SongListTileMenuItems.download:
+            final downloadLocation = await showDialog<DownloadLocation>(
+              context: context,
+              builder: (context) => DownloadDialog(
+                parents: [widget.item],
+                items: [[widget.item]],
+                viewId: _finampUserHelper.currentUser!.currentViewId!,
+              ),
+            );
+
+            if (downloadLocation == null || !mounted) break;
+
+            await checkedAddDownloads(
+              context,
+              downloadLocation: downloadLocation,
+              parents: [widget.item],
+              items: [[widget.item]],
+              viewId: _finampUserHelper.currentUser!.currentViewId!,
+            );
+
+            if (!mounted) break;
+
+            setState(() {});
+            break;
+          case SongListTileMenuItems.removeDownload:
+            await _downloadsHelper.deleteParentAndChildDownloads(
+              jellyfinItemIds: [widget.item.id],
+              deletedFor: widget.item.id,
+            );
+
+            if (!mounted) break;
+
+            setState(() {});
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Download removed.")),
+            );
             break;
           case null:
             break;
