@@ -101,6 +101,11 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   final _finampUserHelper = GetIt.instance<FinampUserHelper>();
   final _downloadsHelper = GetIt.instance<DownloadsHelper>();
 
+  /// Android Auto browse results, keyed by browse node ID. Lets taps play
+  /// from the list that was just browsed instead of re-fetching it from the
+  /// server (which also makes tap-to-play work offline).
+  final Map<String, List<BaseItemDto>> _autoBrowseCache = {};
+
   static const _autoPlaylistsId = '__AA_PLAYLISTS__';
   static const _autoAlbumsId = '__AA_ALBUMS__';
   static const _autoArtistsId = '__AA_ARTISTS__';
@@ -552,69 +557,127 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       final parentId = mediaItem.extras?['autoParentId'] as String?;
       final parentType = mediaItem.extras?['autoParentType'] as String?;
       final startIndex = (mediaItem.extras?['autoQueueIndex'] as int?) ?? 0;
+      final isOffline = FinampSettingsHelper.finampSettings.isOffline;
 
-      List<BaseItemDto>? songs;
-
-      if (parentType == 'playlist') {
-        songs = await _jellyfinApiHelper.getItems(
-          parentItem: BaseItemDto(id: parentId!, type: 'Playlist'),
-          includeItemTypes: 'Audio',
-          isGenres: false,
-        );
-      } else if (parentType == 'album') {
-        songs = await _jellyfinApiHelper.getItems(
-          parentItem: BaseItemDto(id: parentId!),
-          includeItemTypes: 'Audio',
-          isGenres: false,
-          sortBy: 'ParentIndexNumber,IndexNumber',
-        );
-      } else if (parentType == 'artist') {
-        songs = await _jellyfinApiHelper.getItems(
-          parentItem: BaseItemDto(id: parentId!, type: 'MusicArtist'),
-          includeItemTypes: 'Audio',
-          isGenres: false,
-          sortBy: 'Random',
-          limit: 100,
-        );
+      String? cacheKey;
+      if (parentType == 'playlist' && parentId != null) {
+        cacheKey = '$_autoPlaylistPrefix$parentId';
+      } else if (parentType == 'album' && parentId != null) {
+        cacheKey = '$_autoAlbumPrefix$parentId';
+      } else if (parentType == 'artist' && parentId != null) {
+        cacheKey = '$_autoArtistPrefix$parentId';
+      } else if (parentType == 'channel' && parentId != null) {
+        cacheKey = '$_autoChannelPrefix$parentId';
       } else if (parentType == 'favorites') {
-        songs = await _jellyfinApiHelper.getItems(
-          parentItem: _finampUserHelper.currentUser!.currentView,
-          includeItemTypes: 'Audio',
-          isGenres: false,
-          filters: 'IsFavorite',
-          sortBy: 'Random',
-        );
-      } else if (parentType == 'channel') {
-        songs = await _jellyfinApiHelper.getItems(
-          parentItem: BaseItemDto(id: parentId!),
-          includeItemTypes: 'Video',
-          isGenres: false,
-          sortBy: 'PremiereDate',
-          sortOrder: 'Descending',
-        );
-      } else {
-        final rawJson = mediaItem.extras?['itemJson'];
-        if (rawJson != null) {
-          songs = [BaseItemDto.fromJson(Map<String, dynamic>.from(rawJson as Map))];
-        }
+        cacheKey = _autoFavoritesId;
       }
 
-      if (songs != null && songs.isNotEmpty) {
-        final queue = <MediaItem>[];
-        for (final song in songs) {
+      // Prefer the list that was just browsed: it's fresh, avoids a network
+      // round trip on every tap (slow/flaky e.g. over a VPN), and works when
+      // offline.
+      List<BaseItemDto>? songs =
+          cacheKey == null ? null : _autoBrowseCache[cacheKey];
+
+      if (songs == null) {
+        if (parentType == null) {
+          // Standalone item (e.g. a search result) - the full item was
+          // embedded in the MediaItem extras.
+          final rawJson = mediaItem.extras?['itemJson'];
+          if (rawJson != null) {
+            songs = [
+              BaseItemDto.fromJson(Map<String, dynamic>.from(rawJson as Map))
+            ];
+          }
+        } else if (isOffline) {
+          // Cache miss while offline (e.g. Android Auto served a stale browse
+          // tree) - rebuild the list from downloads.
+          songs = _offlineSongsFor(parentType, parentId);
+        } else {
+          // Cache miss while online - fetch the list from the server.
           try {
-            queue.add(await _buildPlaybackMediaItem(song));
+            if (parentType == 'playlist') {
+              songs = await _jellyfinApiHelper.getItems(
+                parentItem: BaseItemDto(id: parentId!, type: 'Playlist'),
+                includeItemTypes: 'Audio',
+                isGenres: false,
+              );
+            } else if (parentType == 'album') {
+              songs = await _jellyfinApiHelper.getItems(
+                parentItem: BaseItemDto(id: parentId!),
+                includeItemTypes: 'Audio',
+                isGenres: false,
+                sortBy: 'ParentIndexNumber,IndexNumber',
+              );
+            } else if (parentType == 'artist') {
+              songs = await _jellyfinApiHelper.getItems(
+                parentItem: BaseItemDto(id: parentId!, type: 'MusicArtist'),
+                includeItemTypes: 'Audio',
+                isGenres: false,
+                sortBy: 'Random',
+                limit: 100,
+              );
+            } else if (parentType == 'favorites') {
+              songs = await _jellyfinApiHelper.getItems(
+                parentItem: _finampUserHelper.currentUser!.currentView,
+                includeItemTypes: 'Audio',
+                isGenres: false,
+                filters: 'IsFavorite',
+                sortBy: 'Random',
+              );
+            } else if (parentType == 'channel') {
+              songs = await _jellyfinApiHelper.getItems(
+                parentItem: BaseItemDto(id: parentId!),
+                includeItemTypes: 'Video',
+                isGenres: false,
+                sortBy: 'PremiereDate',
+                sortOrder: 'Descending',
+              );
+            }
           } catch (e) {
-            _audioServiceBackgroundTaskLogger
-                .warning('Skipping song ${song.id}: $e');
+            _audioServiceBackgroundTaskLogger.warning(
+                'Fetching songs for $parentType failed, using downloads: $e');
+            songs = _offlineSongsFor(parentType, parentId);
           }
         }
-        if (queue.isEmpty) return;
-        setNextInitialIndex(startIndex.clamp(0, queue.length - 1));
-        await updateQueue(queue);
-        await setShuffleMode(AudioServiceShuffleMode.none);
-        play();
       }
+
+      if (songs == null || songs.isEmpty) {
+        _audioServiceBackgroundTaskLogger.severe(
+            'playMediaItem: no songs found for ${mediaItem.id} '
+            '(parentType: $parentType, offline: $isOffline)');
+        return;
+      }
+
+      final built = await Future.wait(songs.map((song) async {
+        try {
+          return await _buildPlaybackMediaItem(song);
+        } catch (e) {
+          _audioServiceBackgroundTaskLogger
+              .warning('Skipping song ${song.id}: $e');
+          return null;
+        }
+      }));
+
+      // In offline mode, songs without a verified local download can't
+      // play - skip them instead of letting them fail the whole queue.
+      final queue = [
+        for (final item in built)
+          if (item != null &&
+              (!isOffline || item.extras?['downloadedSongJson'] != null))
+            item
+      ];
+
+      if (queue.isEmpty) {
+        _audioServiceBackgroundTaskLogger.severe(
+            'playMediaItem: no playable songs for ${mediaItem.id} '
+            '(parentType: $parentType, offline: $isOffline)');
+        return;
+      }
+
+      setNextInitialIndex(startIndex.clamp(0, queue.length - 1));
+      await updateQueue(queue);
+      await setShuffleMode(AudioServiceShuffleMode.none);
+      play();
     } catch (e) {
       _audioServiceBackgroundTaskLogger.severe('playMediaItem error: $e');
     }
@@ -627,6 +690,17 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   ]) async {
     if (_finampUserHelper.currentUser == null) return [];
     try {
+      if (FinampSettingsHelper.finampSettings.isOffline) {
+        final queryLower = query.toLowerCase();
+        final songs = _downloadedBaseItems()
+            .where(
+                (s) => s.name?.toLowerCase().contains(queryLower) ?? false)
+            .take(50)
+            .toList();
+        return List.generate(
+            songs.length, (i) => _buildBrowseSongItem(songs[i], i, null, null));
+      }
+
       final songs = await _jellyfinApiHelper.getItems(
         searchTerm: query,
         parentItem: _finampUserHelper.currentUser!.currentView,
@@ -648,63 +722,77 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   List<MediaItem> _getAutoRootItems() {
     const listHint = 1; // CONTENT_STYLE_LIST_ITEM_HINT_VALUE
     const gridHint = 2; // CONTENT_STYLE_GRID_ITEM_HINT_VALUE
+
+    if (FinampSettingsHelper.finampSettings.isOffline) {
+      // Only show categories that actually have offline (downloaded) content.
+      final items = <MediaItem>[];
+      final parents = _downloadsHelper.downloadedParents;
+      final songs = _downloadedBaseItems();
+      if (parents.any((p) => p.item.type == 'Playlist')) {
+        items.add(
+            _autoRootItem(_autoPlaylistsId, 'Playlists', listHint, listHint));
+      }
+      if (parents.any((p) => p.item.type == 'MusicAlbum')) {
+        items.add(_autoRootItem(_autoAlbumsId, 'Albums', gridHint, listHint));
+      }
+      if (songs.any((s) =>
+          (s.albumArtists?.isNotEmpty ?? false) ||
+          (s.artistItems?.isNotEmpty ?? false))) {
+        items.add(_autoRootItem(_autoArtistsId, 'Artists', listHint, listHint));
+      }
+      if (songs.any((s) => s.userData?.isFavorite == true)) {
+        items.add(
+            _autoRootItem(_autoFavoritesId, 'Favorites', listHint, listHint));
+      }
+      if (parents.any((p) => p.item.type == 'Folder')) {
+        items.add(
+            _autoRootItem(_autoChannelsId, 'Channels', listHint, listHint));
+      }
+      return items;
+    }
+
     return [
-      MediaItem(
-        id: _autoPlaylistsId,
-        title: 'Playlists',
-        playable: false,
-        extras: {
-          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
-          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
-        },
-      ),
-      MediaItem(
-        id: _autoAlbumsId,
-        title: 'Albums',
-        playable: false,
-        extras: {
-          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': gridHint,
-          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
-        },
-      ),
-      MediaItem(
-        id: _autoArtistsId,
-        title: 'Artists',
-        playable: false,
-        extras: {
-          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
-          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
-        },
-      ),
-      MediaItem(
-        id: _autoFavoritesId,
-        title: 'Favorites',
-        playable: false,
-        extras: {
-          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
-          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
-        },
-      ),
-      MediaItem(
-        id: _autoChannelsId,
-        title: 'Channels',
-        playable: false,
-        extras: {
-          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': listHint,
-          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': listHint,
-        },
-      ),
+      _autoRootItem(_autoPlaylistsId, 'Playlists', listHint, listHint),
+      _autoRootItem(_autoAlbumsId, 'Albums', gridHint, listHint),
+      _autoRootItem(_autoArtistsId, 'Artists', listHint, listHint),
+      _autoRootItem(_autoFavoritesId, 'Favorites', listHint, listHint),
+      _autoRootItem(_autoChannelsId, 'Channels', listHint, listHint),
     ];
   }
 
+  MediaItem _autoRootItem(
+          String id, String title, int browsableHint, int playableHint) =>
+      MediaItem(
+        id: id,
+        title: title,
+        playable: false,
+        extras: {
+          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': browsableHint,
+          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': playableHint,
+        },
+      );
+
   Future<List<MediaItem>> _getAutoPlaylists() async {
+    if (FinampSettingsHelper.finampSettings.isOffline) {
+      return _offlineParentNodes(
+          'Playlist', _autoPlaylistPrefix, 'Unknown Playlist');
+    }
+
     final view = _finampUserHelper.currentUser!.currentView;
-    final playlists = await _jellyfinApiHelper.getItems(
-      parentItem: view,
-      includeItemTypes: 'Playlist',
-      isGenres: false,
-      sortBy: 'SortName',
-    );
+    List<BaseItemDto>? playlists;
+    try {
+      playlists = await _jellyfinApiHelper.getItems(
+        parentItem: view,
+        includeItemTypes: 'Playlist',
+        isGenres: false,
+        sortBy: 'SortName',
+      );
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger
+          .warning('Playlists fetch failed, using downloads: $e');
+      return _offlineParentNodes(
+          'Playlist', _autoPlaylistPrefix, 'Unknown Playlist');
+    }
     if (playlists == null) return [];
     return playlists
         .map((p) => MediaItem(
@@ -720,25 +808,47 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   }
 
   Future<List<MediaItem>> _getAutoPlaylistSongs(String playlistId) async {
-    final songs = await _jellyfinApiHelper.getItems(
-      parentItem: BaseItemDto(id: playlistId, type: 'Playlist'),
-      includeItemTypes: 'Audio',
-      isGenres: false,
-    );
-    if (songs == null) return [];
+    List<BaseItemDto>? songs;
+    if (!FinampSettingsHelper.finampSettings.isOffline) {
+      try {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: playlistId, type: 'Playlist'),
+          includeItemTypes: 'Audio',
+          isGenres: false,
+        );
+      } catch (e) {
+        _audioServiceBackgroundTaskLogger
+            .warning('Playlist songs fetch failed, using downloads: $e');
+      }
+    }
+    songs ??= _offlineParentChildren(playlistId);
+    if (songs.isEmpty) return [];
+    _autoBrowseCache['$_autoPlaylistPrefix$playlistId'] = songs;
     return List.generate(
         songs.length, (i) => _buildBrowseSongItem(songs[i], i, playlistId, 'playlist'));
   }
 
   Future<List<MediaItem>> _getAutoAlbums() async {
+    if (FinampSettingsHelper.finampSettings.isOffline) {
+      return _offlineParentNodes('MusicAlbum', _autoAlbumPrefix, 'Unknown Album');
+    }
+
     final view = _finampUserHelper.currentUser!.currentView;
-    final albums = await _jellyfinApiHelper.getItems(
-      parentItem: view,
-      includeItemTypes: 'MusicAlbum',
-      isGenres: false,
-      sortBy: 'SortName',
-      recursive: true,
-    );
+    List<BaseItemDto>? albums;
+    try {
+      albums = await _jellyfinApiHelper.getItems(
+        parentItem: view,
+        includeItemTypes: 'MusicAlbum',
+        isGenres: false,
+        sortBy: 'SortName',
+        recursive: true,
+      );
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger
+          .warning('Albums fetch failed, using downloads: $e');
+      return _offlineParentNodes(
+          'MusicAlbum', _autoAlbumPrefix, 'Unknown Album');
+    }
     if (albums == null) return [];
     return albums
         .map((a) => MediaItem(
@@ -755,25 +865,46 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   }
 
   Future<List<MediaItem>> _getAutoAlbumSongs(String albumId) async {
-    final songs = await _jellyfinApiHelper.getItems(
-      parentItem: BaseItemDto(id: albumId),
-      includeItemTypes: 'Audio',
-      isGenres: false,
-      sortBy: 'ParentIndexNumber,IndexNumber',
-    );
-    if (songs == null) return [];
+    List<BaseItemDto>? songs;
+    if (!FinampSettingsHelper.finampSettings.isOffline) {
+      try {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: albumId),
+          includeItemTypes: 'Audio',
+          isGenres: false,
+          sortBy: 'ParentIndexNumber,IndexNumber',
+        );
+      } catch (e) {
+        _audioServiceBackgroundTaskLogger
+            .warning('Album songs fetch failed, using downloads: $e');
+      }
+    }
+    songs ??= _offlineParentChildren(albumId, sortAlbumTracks: true);
+    if (songs.isEmpty) return [];
+    _autoBrowseCache['$_autoAlbumPrefix$albumId'] = songs;
     return List.generate(
         songs.length, (i) => _buildBrowseSongItem(songs[i], i, albumId, 'album'));
   }
 
   Future<List<MediaItem>> _getAutoArtists() async {
+    if (FinampSettingsHelper.finampSettings.isOffline) {
+      return _offlineArtistItems();
+    }
+
     final view = _finampUserHelper.currentUser!.currentView;
-    final artists = await _jellyfinApiHelper.getItems(
-      parentItem: view,
-      includeItemTypes: 'MusicArtist',
-      isGenres: false,
-      sortBy: 'SortName',
-    );
+    List<BaseItemDto>? artists;
+    try {
+      artists = await _jellyfinApiHelper.getItems(
+        parentItem: view,
+        includeItemTypes: 'MusicArtist',
+        isGenres: false,
+        sortBy: 'SortName',
+      );
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger
+          .warning('Artists fetch failed, using downloads: $e');
+      return _offlineArtistItems();
+    }
     if (artists == null) return [];
     return artists
         .map((a) => MediaItem(
@@ -789,27 +920,50 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   }
 
   Future<List<MediaItem>> _getAutoArtistSongs(String artistId) async {
-    final songs = await _jellyfinApiHelper.getItems(
-      parentItem: BaseItemDto(id: artistId, type: 'MusicArtist'),
-      includeItemTypes: 'Audio',
-      isGenres: false,
-      sortBy: 'Random',
-      limit: 100,
-    );
-    if (songs == null) return [];
+    List<BaseItemDto>? songs;
+    if (!FinampSettingsHelper.finampSettings.isOffline) {
+      try {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: artistId, type: 'MusicArtist'),
+          includeItemTypes: 'Audio',
+          isGenres: false,
+          sortBy: 'Random',
+          limit: 100,
+        );
+      } catch (e) {
+        _audioServiceBackgroundTaskLogger
+            .warning('Artist songs fetch failed, using downloads: $e');
+      }
+    }
+    songs ??= _offlineArtistSongs(artistId);
+    if (songs.isEmpty) return [];
+    _autoBrowseCache['$_autoArtistPrefix$artistId'] = songs;
     return List.generate(
         songs.length, (i) => _buildBrowseSongItem(songs[i], i, artistId, 'artist'));
   }
 
   Future<List<MediaItem>> _getAutoChannels() async {
+    if (FinampSettingsHelper.finampSettings.isOffline) {
+      return _offlineParentNodes(
+          'Folder', _autoChannelPrefix, 'Unknown Channel');
+    }
+
     final view = _finampUserHelper.currentUser!.currentView;
-    final channels = await _jellyfinApiHelper.getItems(
-      parentItem: view,
-      includeItemTypes: 'Folder',
-      isGenres: false,
-      sortBy: 'SortName',
-      recursive: false,
-    );
+    List<BaseItemDto>? channels;
+    try {
+      channels = await _jellyfinApiHelper.getItems(
+        parentItem: view,
+        includeItemTypes: 'Folder',
+        isGenres: false,
+        sortBy: 'SortName',
+        recursive: false,
+      );
+    } catch (e) {
+      _audioServiceBackgroundTaskLogger
+          .warning('Channels fetch failed, using downloads: $e');
+      return _offlineParentNodes(
+          'Folder', _autoChannelPrefix, 'Unknown Channel');
+    }
     if (channels == null) return [];
     return channels
         .map((c) => MediaItem(
@@ -825,30 +979,161 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
   }
 
   Future<List<MediaItem>> _getAutoChannelVideos(String channelId) async {
-    final songs = await _jellyfinApiHelper.getItems(
-      parentItem: BaseItemDto(id: channelId),
-      includeItemTypes: 'Video',
-      isGenres: false,
-      sortBy: 'PremiereDate',
-      sortOrder: 'Descending',
-    );
-    if (songs == null) return [];
+    List<BaseItemDto>? songs;
+    if (!FinampSettingsHelper.finampSettings.isOffline) {
+      try {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: BaseItemDto(id: channelId),
+          includeItemTypes: 'Video',
+          isGenres: false,
+          sortBy: 'PremiereDate',
+          sortOrder: 'Descending',
+        );
+      } catch (e) {
+        _audioServiceBackgroundTaskLogger
+            .warning('Channel videos fetch failed, using downloads: $e');
+      }
+    }
+    songs ??= _offlineParentChildren(channelId);
+    if (songs.isEmpty) return [];
+    _autoBrowseCache['$_autoChannelPrefix$channelId'] = songs;
     return List.generate(songs.length,
         (i) => _buildBrowseSongItem(songs[i], i, channelId, 'channel'));
   }
 
   Future<List<MediaItem>> _getAutoFavoriteSongs() async {
-    final songs = await _jellyfinApiHelper.getItems(
-      parentItem: _finampUserHelper.currentUser!.currentView,
-      includeItemTypes: 'Audio',
-      isGenres: false,
-      filters: 'IsFavorite',
-      sortBy: 'Random',
-    );
-    if (songs == null) return [];
+    List<BaseItemDto>? songs;
+    if (!FinampSettingsHelper.finampSettings.isOffline) {
+      try {
+        songs = await _jellyfinApiHelper.getItems(
+          parentItem: _finampUserHelper.currentUser!.currentView,
+          includeItemTypes: 'Audio',
+          isGenres: false,
+          filters: 'IsFavorite',
+          sortBy: 'Random',
+        );
+      } catch (e) {
+        _audioServiceBackgroundTaskLogger
+            .warning('Favorites fetch failed, using downloads: $e');
+      }
+    }
+    songs ??= _offlineFavoriteSongs();
+    if (songs.isEmpty) return [];
+    _autoBrowseCache[_autoFavoritesId] = songs;
     return List.generate(
         songs.length, (i) => _buildBrowseSongItem(songs[i], i, null, 'favorites'));
   }
+
+  // ── Offline support for Android Auto ───────────────────────────────────
+
+  /// All downloaded songs as Jellyfin items, regardless of download status.
+  /// Playback verification skips any that aren't actually playable.
+  List<BaseItemDto> _downloadedBaseItems() =>
+      _downloadsHelper.downloadedSongs.map((s) => s.song).toList();
+
+  /// Lists downloaded parents of [jellyfinType] (e.g. Playlist, MusicAlbum,
+  /// Folder for Pinchflat channels) as browse nodes.
+  List<MediaItem> _offlineParentNodes(
+      String jellyfinType, String idPrefix, String fallbackTitle) {
+    return _downloadsHelper.downloadedParents
+        .where((p) => p.item.type == jellyfinType)
+        .map((p) => MediaItem(
+              id: '$idPrefix${p.item.id}',
+              title: p.item.name ?? fallbackTitle,
+              artist: p.item.albumArtist,
+              artUri:
+                  _downloadsHelper.getDownloadedImage(p.item)?.file.uri ??
+                      _jellyfinApiHelper.getImageUrl(item: p.item),
+              playable: false,
+              extras: const {
+                'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+              },
+            ))
+        .toList();
+  }
+
+  /// Derives the list of artists from the downloaded songs.
+  List<MediaItem> _offlineArtistItems() {
+    final artists = <String, String>{};
+    for (final song in _downloadedBaseItems()) {
+      for (final artist in [...?song.albumArtists, ...?song.artistItems]) {
+        artists.putIfAbsent(artist.id, () => artist.name ?? 'Unknown Artist');
+      }
+    }
+    final entries = artists.entries.toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return entries
+        .map((e) => MediaItem(
+              id: '$_autoArtistPrefix${e.key}',
+              title: e.value,
+              playable: false,
+              extras: const {
+                'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
+              },
+            ))
+        .toList();
+  }
+
+  /// The downloaded children of a downloaded parent (playlist, album or
+  /// channel), in download order. Albums are sorted by disc/track number.
+  List<BaseItemDto> _offlineParentChildren(String parentId,
+      {bool sortAlbumTracks = false}) {
+    final children =
+        _downloadsHelper.getDownloadedParent(parentId)?.downloadedChildren;
+    if (children == null) return [];
+    final songs = children.values.toList();
+    if (sortAlbumTracks) {
+      songs.sort((a, b) {
+        final discCompare =
+            (a.parentIndexNumber ?? 0).compareTo(b.parentIndexNumber ?? 0);
+        return discCompare != 0
+            ? discCompare
+            : (a.indexNumber ?? 0).compareTo(b.indexNumber ?? 0);
+      });
+    }
+    return songs;
+  }
+
+  bool _songHasArtist(BaseItemDto song, String artistId) =>
+      song.artistItems?.any((a) => a.id == artistId) == true ||
+      song.albumArtists?.any((a) => a.id == artistId) == true;
+
+  List<BaseItemDto> _offlineArtistSongs(String artistId) {
+    final songs = _downloadedBaseItems()
+        .where((s) => _songHasArtist(s, artistId))
+        .toList();
+    songs.shuffle();
+    return songs;
+  }
+
+  List<BaseItemDto> _offlineFavoriteSongs() {
+    final songs = _downloadedBaseItems()
+        .where((s) => s.userData?.isFavorite == true)
+        .toList();
+    songs.shuffle();
+    return songs;
+  }
+
+  /// Rebuilds the song list for a browse parent from downloads, used when a
+  /// tap arrives without a cached browse list (e.g. offline after an app
+  /// restart).
+  List<BaseItemDto> _offlineSongsFor(String parentType, String? parentId) {
+    switch (parentType) {
+      case 'playlist':
+      case 'channel':
+        return _offlineParentChildren(parentId ?? '');
+      case 'album':
+        return _offlineParentChildren(parentId ?? '', sortAlbumTracks: true);
+      case 'artist':
+        return _offlineArtistSongs(parentId ?? '');
+      case 'favorites':
+        return _offlineFavoriteSongs();
+      default:
+        return [];
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
 
   /// Videos imported via Pinchflat keep the YouTube video id as a
   /// `[xxxxxxxxxxx]` suffix on the file/item name; strip it for display,
@@ -871,7 +1156,8 @@ class MusicPlayerBackgroundTask extends BaseAudioHandler {
       title: _displayTitle(song),
       album: song.album,
       artist: song.artists?.join(', ') ?? song.albumArtist,
-      artUri: _jellyfinApiHelper.getImageUrl(item: song),
+      artUri: _downloadsHelper.getDownloadedImage(song)?.file.uri ??
+          _jellyfinApiHelper.getImageUrl(item: song),
       duration: song.runTimeTicks == null
           ? null
           : Duration(microseconds: song.runTimeTicks! ~/ 10),

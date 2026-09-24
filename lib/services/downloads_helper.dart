@@ -551,6 +551,10 @@ class DownloadsHelper {
     }
   }
 
+  /// All downloaded songs in the database, regardless of download status.
+  /// Used e.g. by Android Auto offline browsing.
+  Iterable<DownloadedSong> get downloadedSongs => _downloadedItemsBox.values;
+
   DownloadedSong? getDownloadedSong(String id) {
     try {
       return _downloadedItemsBox.get(id);
